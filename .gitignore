@@ -1,0 +1,65 @@
+# ────────────── GENERAL ──────────────
+*.log
+*.tmp
+*.swp
+*.class
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.DS_Store
+.env
+__pycache__/
+
+# ────────────── IDEs ──────────────
+.idea/
+.vscode/
+.history/
+*.iml
+
+# ────────────── FLUTTER ──────────────
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.packages
+**/pubspec.lock
+**/build/
+**/ios/Flutter/.last_build_id
+**/ios/Flutter/App.framework
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/.symlinks
+**/ios/Pods
+**/ios/Runner.xcworkspace
+**/ios/build/
+**/macos/Pods
+**/macos/build/
+**/macos/Flutter/ephemeral
+**/android/.gradle/
+**/android/app/.cxx/
+**/android/local.properties
+**/android/.idea
+**/android/.settings
+**/android/build/
+**/web/.dart_tool/
+
+# ────────────── PYTHON ──────────────
+backend/python/.venv/
+backend/python/__pycache__/
+backend/python/*.pyc
+backend/python/.mypy_cache/
+backend/python/.pytest_cache/
+backend/python/.coverage
+
+# ────────────── DOCKER ──────────────
+docker-compose.override.yml
+.docker/
+
+# ────────────── SYMBOLICATION / OBFUSCATION ──────────────
+**/app.*.symbols
+**/app.*.map.json
+
+# ────────────── TEST OUTPUT / MIGRATIONS ──────────────
+.migrate_working_dir/
+coverage/

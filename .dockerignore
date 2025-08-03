@@ -1,0 +1,28 @@
+# General
+*.log
+*.tmp
+*.swp
+*.class
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.DS_Store
+__pycache__/
+.env
+
+# Python
+backend/python/.venv/
+
+# Flutter
+**/build/
+**/.dart_tool/
+**/pubspec.lock
+
+# Git
+.git
+.gitignore
+
+# Node (if ever used)
+node_modules/
