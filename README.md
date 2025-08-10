@@ -10,3 +10,13 @@
 ### 1. Set up basic frontend
 
 ### 2. Made a directory structure for backend
+
+# Day2:
+
+### 1. Updated the UI on fronend, to look better
+
+### 2. Fixede video uploads, can rewatch them after upload, before submiting
+
+# Day3:
+
+### 1. Started python backend to get the model and analyze video
