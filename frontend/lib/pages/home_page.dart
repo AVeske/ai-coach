@@ -1,70 +1,83 @@
 import 'package:flutter/material.dart';
-import 'chest_page.dart';
-import 'back_page.dart';
-import 'arms_page.dart';
-import 'legs_page.dart';
+import '../models/exercise.dart';
+import 'exercise_list_page.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
 
-  void navigateTo(BuildContext context, Widget page) {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => page));
+  void _openGroup(BuildContext context, ExerciseGroup group) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ExerciseListPage(group: group)),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final groups = ExerciseGroup.values;
     return Scaffold(
-      appBar: AppBar(title: const Text('AI Coach 💪')),
-      body: Center(
+      appBar: AppBar(title: const Text('AI Coach')),
+      body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32.0),
+          padding: const EdgeInsets.all(16),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center, // center vertically
-            crossAxisAlignment:
-                CrossAxisAlignment.stretch, // full width buttons
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Ready to get shredded?',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+                'Select a body part',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
               ),
-              const SizedBox(height: 40),
-              ElevatedButton(
-                onPressed: () => navigateTo(context, const ChestPage()),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 20),
-                  textStyle: const TextStyle(fontSize: 20),
+              const SizedBox(height: 12),
+              Expanded(
+                child: GridView.builder(
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                    childAspectRatio: 1.15,
+                  ),
+                  itemCount: groups.length,
+                  itemBuilder: (_, i) {
+                    final g = groups[i];
+                    return _GroupCard(
+                      title: groupLabel(g),
+                      onTap: () => _openGroup(context, g),
+                    );
+                  },
                 ),
-                child: const Text('Chest'),
-              ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: () => navigateTo(context, const BackPage()),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 20),
-                  textStyle: const TextStyle(fontSize: 20),
-                ),
-                child: const Text('Back'),
-              ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: () => navigateTo(context, const ArmsPage()),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 20),
-                  textStyle: const TextStyle(fontSize: 20),
-                ),
-                child: const Text('Arms'),
-              ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: () => navigateTo(context, const LegsPage()),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 20),
-                  textStyle: const TextStyle(fontSize: 20),
-                ),
-                child: const Text('Legs'),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _GroupCard extends StatelessWidget {
+  final String title;
+  final VoidCallback onTap;
+  const _GroupCard({required this.title, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Ink(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          gradient: LinearGradient(
+            colors: [Color(0xFF9C6410), Color(0xFF744B0D)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          border: Border.all(color: Color(0xFF70542A)),
+        ),
+        child: Center(
+          child: Text(
+            title,
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
           ),
         ),
       ),

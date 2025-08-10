@@ -1,14 +1,15 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:video_player/video_player.dart';
+import 'package:http/http.dart' as http;
+
+import '../config.dart';
 
 class VideoUploadPage extends StatefulWidget {
   final String exercise;
-
   const VideoUploadPage({super.key, required this.exercise});
 
   @override
@@ -20,84 +21,124 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
   File? _videoFile;
   VideoPlayerController? _videoController;
   String aiFeedback = '';
+  bool _isBusy = false;
+
+  bool get _hasVideo =>
+      _videoFile != null &&
+      _videoController != null &&
+      _videoController!.value.isInitialized;
+
+  void _showSnack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
 
   Future<void> _pickVideo() async {
-    final status = await Permission.photos.request();
-    if (!mounted) return;
-
-    if (!status.isGranted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Gallery access denied')));
-      return;
-    }
-
-    final picked = await _picker.pickVideo(
-      source: ImageSource.gallery,
-      maxDuration: const Duration(seconds: 30),
-    );
-    if (!mounted) return;
-
-    if (picked != null) {
-      _setVideo(File(picked.path));
-    }
-  }
-
-  Future<void> _recordVideoWithCountdown() async {
-    final cameraStatus = await Permission.camera.request();
-    final micStatus = await Permission.microphone.request();
-    if (!mounted) return;
-
-    if (!cameraStatus.isGranted || !micStatus.isGranted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Camera and microphone permissions are required"),
-        ),
+    try {
+      final picked = await _picker.pickVideo(
+        source: ImageSource.gallery,
+        maxDuration: const Duration(seconds: 30),
       );
-      return;
-    }
-
-    await showDialog(
-      context: context,
-      builder: (ctx) => const CountdownDialog(),
-    );
-    if (!mounted) return;
-
-    final picked = await _picker.pickVideo(
-      source: ImageSource.camera,
-      maxDuration: const Duration(seconds: 30),
-    );
-    if (!mounted) return;
-
-    if (picked != null) {
-      _setVideo(File(picked.path));
+      if (!mounted) return;
+      if (picked == null) {
+        _showSnack('No video selected');
+        return;
+      }
+      await _setVideo(File(picked.path));
+    } catch (e) {
+      _showSnack('Failed to pick video: $e');
     }
   }
 
-  void _setVideo(File file) {
-    _videoFile = file;
-    _videoController?.dispose();
-    _videoController = VideoPlayerController.file(file)
-      ..initialize().then((_) {
-        if (!mounted) return;
-        setState(() {});
-        _videoController?.setLooping(true);
-        _videoController?.play();
-        _getAiFeedback();
+  Future<void> _recordVideo() async {
+    try {
+      final cameraStatus = await Permission.camera.request();
+      final micStatus = await Permission.microphone.request();
+      if (!mounted) return;
+
+      if (!cameraStatus.isGranted || !micStatus.isGranted) {
+        _showSnack('Camera and microphone permissions are required');
+        return;
+      }
+
+      final picked = await _picker.pickVideo(
+        source: ImageSource.camera,
+        maxDuration: const Duration(seconds: 30),
+      );
+      if (!mounted) return;
+      if (picked == null) {
+        _showSnack('Recording cancelled');
+        return;
+      }
+      await _setVideo(File(picked.path));
+    } catch (e) {
+      _showSnack('Failed to record video: $e');
+    }
+  }
+
+  Future<void> _setVideo(File file) async {
+    try {
+      setState(() {
+        _isBusy = true;
+        aiFeedback = '';
       });
+      _videoFile = file;
+      _videoController?.dispose();
+
+      final controller = VideoPlayerController.file(file);
+      _videoController = controller;
+      await controller.initialize();
+      if (!mounted) return;
+
+      // Extra guard for max 30s
+      if (controller.value.duration > const Duration(seconds: 30)) {
+        _showSnack('Video longer than 30s. Please trim and try again.');
+        await controller.dispose();
+        _videoController = null;
+        setState(() => _isBusy = false);
+        return;
+      }
+
+      controller.setLooping(false);
+      await controller.pause(); // start paused; tap to play
+      setState(() => _isBusy = false);
+    } catch (e) {
+      _showSnack('Could not load video: $e');
+      setState(() => _isBusy = false);
+    }
   }
 
-  void _getAiFeedback() async {
-    await Future.delayed(const Duration(seconds: 2));
-    if (!mounted) return;
-
+  Future<void> _uploadVideo(File file) async {
     setState(() {
-      aiFeedback = "Not bad, bro. Just squeeze your chest more at the top.";
+      aiFeedback = '';
+      _isBusy = true;
     });
+
+    try {
+      final req =
+          http.MultipartRequest('POST', Uri.parse('$apiBaseUrl/analyze'))
+            ..fields['exercise'] = widget.exercise
+            ..files.add(await http.MultipartFile.fromPath('video', file.path));
+
+      final streamed = await req.send();
+      final res = await http.Response.fromStream(streamed);
+
+      if (!mounted) return;
+      if (res.statusCode == 200) {
+        setState(() => aiFeedback = res.body);
+      } else {
+        _showSnack('Backend error: ${res.statusCode}');
+      }
+    } catch (e) {
+      _showSnack('Upload failed: $e');
+    } finally {
+      if (mounted) setState(() => _isBusy = false);
+    }
   }
 
   @override
   void dispose() {
+    _videoController?.pause();
     _videoController?.dispose();
     super.dispose();
   }
@@ -105,113 +146,131 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Upload for ${widget.exercise}')),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            if (_videoController != null &&
-                _videoController!.value.isInitialized)
-              AspectRatio(
-                aspectRatio: _videoController!.value.aspectRatio,
-                child: SizedBox(
-                  height: 180,
-                  child: VideoPlayer(_videoController!),
+      appBar: AppBar(title: Text('Upload • ${widget.exercise}')),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Compact, portrait-style preview (tap to play/pause)
+              GestureDetector(
+                onTap: () {
+                  if (_hasVideo) {
+                    final v = _videoController!;
+                    v.value.isPlaying ? v.pause() : v.play();
+                    setState(() {});
+                  }
+                },
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).cardColor,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFFFCC80)),
+                  ),
+                  padding: const EdgeInsets.all(8),
+                  child: Center(
+                    child: _hasVideo
+                        ? ConstrainedBox(
+                            // ↓ make preview smaller/wider by changing maxWidth
+                            constraints: const BoxConstraints(maxWidth: 240),
+                            child: AspectRatio(
+                              // ↓ change this to adjust shape (e.g., 3/4, 9/16, 2/3)
+                              aspectRatio: 14 / 15,
+                              child: Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: VideoPlayer(_videoController!),
+                                  ),
+                                  if (!_videoController!.value.isPlaying)
+                                    Container(
+                                      decoration: const BoxDecoration(
+                                        color: Color(0x40000000), // ~25% black
+                                        shape: BoxShape.circle,
+                                      ),
+                                      padding: const EdgeInsets.all(12),
+                                      child: const Icon(
+                                        Icons.play_arrow,
+                                        size: 40,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          )
+                        : const SizedBox(
+                            height: 140,
+                            child: Center(child: Text('No video selected')),
+                          ),
+                  ),
                 ),
-              )
-            else
-              Container(
-                height: 180,
-                color: Colors.black12,
-                alignment: Alignment.center,
-                child: const Text("No video selected"),
               ),
-            const SizedBox(height: 20),
-            ElevatedButton.icon(
-              onPressed: _recordVideoWithCountdown,
-              icon: const Icon(Icons.videocam),
-              label: const Text("Record Video (max 30s)"),
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size.fromHeight(50),
+
+              const SizedBox(height: 12),
+              if (_isBusy) const LinearProgressIndicator(),
+              const SizedBox(height: 12),
+
+              // Pick/Record row
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: _isBusy ? null : _recordVideo,
+                      icon: const Icon(Icons.videocam),
+                      label: const Text('Record'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: _isBusy ? null : _pickVideo,
+                      icon: const Icon(Icons.upload_file),
+                      label: const Text('Upload'),
+                    ),
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(height: 10),
-            ElevatedButton.icon(
-              onPressed: _pickVideo,
-              icon: const Icon(Icons.upload_file),
-              label: const Text("Upload from Gallery"),
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size.fromHeight(50),
-              ),
-            ),
-            const SizedBox(height: 30),
-            if (aiFeedback.isNotEmpty)
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.orange.shade100,
-                  borderRadius: BorderRadius.circular(12),
+
+              const SizedBox(height: 16),
+
+              // Submit only after a video is ready and not busy and no feedback yet
+              if (_hasVideo && !_isBusy && aiFeedback.isEmpty)
+                ElevatedButton.icon(
+                  onPressed: () => _uploadVideo(_videoFile!),
+                  icon: const Icon(Icons.send),
+                  label: const Text('Submit for Feedback'),
+                  style: ElevatedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(48),
+                  ),
                 ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Icon(Icons.fitness_center, size: 28),
-                    const SizedBox(width: 12),
-                    Expanded(
+
+              const SizedBox(height: 16),
+
+              // Feedback panel
+              if (aiFeedback.isNotEmpty)
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFCC80),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFFFE0B2)),
+                    ),
+                    child: SingleChildScrollView(
                       child: Text(
                         aiFeedback,
-                        style: const TextStyle(fontSize: 16),
+                        style: const TextStyle(fontSize: 16, height: 1.35),
                       ),
                     ),
-                  ],
+                  ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
-    );
-  }
-}
-
-class CountdownDialog extends StatefulWidget {
-  const CountdownDialog({super.key});
-
-  @override
-  State<CountdownDialog> createState() => _CountdownDialogState();
-}
-
-class _CountdownDialogState extends State<CountdownDialog> {
-  int secondsLeft = 5;
-
-  @override
-  void initState() {
-    super.initState();
-    _startCountdown();
-  }
-
-  void _startCountdown() {
-    Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-
-      if (secondsLeft == 1) {
-        timer.cancel();
-        Navigator.of(context).pop();
-      } else {
-        setState(() {
-          secondsLeft--;
-        });
-      }
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('Get Ready!'),
-      content: Text('$secondsLeft...'),
     );
   }
 }
