@@ -22,3 +22,9 @@
 ### 1. Started python backend to get the model and analyze video
 
 ### 2. Added the 1st AI-agent. -> Need to work on more specific feedback!!
+
+# Day4:
+
+### 1. Got a bit better response by AI, need better cases for when the reps are very bad etc or wrong video.
+
+### 2. Fixed the UI a bit

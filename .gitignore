@@ -6,6 +6,7 @@
 *.pyc
 *.pyo
 *.pyd
+*.env
 *.so
 *.egg-info/
 .DS_Store
