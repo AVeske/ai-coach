@@ -14,10 +14,15 @@ class ExerciseListPage extends StatefulWidget {
 class _ExerciseListPageState extends State<ExerciseListPage> {
   String _query = '';
 
-  void _openExercise(String name) {
+  void _openExercise(Exercise ex) {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => VideoUploadPage(exercise: name)),
+      MaterialPageRoute(
+        builder: (_) => VideoUploadPage(
+          exerciseId: ex.id, // <-- slug like "pushup"
+          exerciseLabel: ex.name, // <-- pretty label, e.g. "Push-ups"
+        ),
+      ),
     );
   }
 
@@ -49,7 +54,7 @@ class _ExerciseListPageState extends State<ExerciseListPage> {
                   separatorBuilder: (_, __) => const SizedBox(height: 10),
                   itemBuilder: (_, i) => ExerciseTile(
                     title: visible[i].name,
-                    onTap: () => _openExercise(visible[i].name),
+                    onTap: () => _openExercise(visible[i]),
                   ),
                 ),
               ),

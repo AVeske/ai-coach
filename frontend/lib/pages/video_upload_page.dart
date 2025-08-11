@@ -11,8 +11,14 @@ import 'package:http/http.dart' as http;
 import '../config.dart';
 
 class VideoUploadPage extends StatefulWidget {
-  final String exercise;
-  const VideoUploadPage({super.key, required this.exercise});
+  final String exerciseId; // e.g., "pushup"
+  final String exerciseLabel; // e.g., "Push-ups"
+
+  const VideoUploadPage({
+    super.key,
+    required this.exerciseId,
+    required this.exerciseLabel,
+  });
 
   @override
   State<VideoUploadPage> createState() => _VideoUploadPageState();
@@ -22,8 +28,13 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
   final ImagePicker _picker = ImagePicker();
   File? _videoFile;
   VideoPlayerController? _videoController;
-  String aiFeedback = '';
+
   bool _isBusy = false;
+
+  // Parsed response bits
+  String feedbackText = '';
+  Map<String, dynamic>? metrics; // backend 'metrics' (per-rep + summary)
+  Map<String, dynamic>? errorDetail; // backend error payload (when ok:false)
 
   void _showSnack(String msg) {
     if (!mounted) return;
@@ -58,7 +69,6 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
         return;
       }
 
-      // Countdown before starting recording
       await showDialog(
         context: context,
         barrierDismissible: false,
@@ -83,7 +93,14 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
 
   Future<void> _setVideo(File file) async {
     try {
-      setState(() => _isBusy = true);
+      setState(() {
+        _isBusy = true;
+        // clear prior results
+        feedbackText = '';
+        metrics = null;
+        errorDetail = null;
+      });
+
       _videoFile = file;
       _videoController?.dispose();
       final controller = VideoPlayerController.file(file);
@@ -99,9 +116,10 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
         return;
       }
 
-      controller.setLooping(false); // not auto-looping
+      controller.setLooping(false);
       setState(() => _isBusy = false);
-      await _uploadVideo(file);
+
+      // Note: we no longer auto-upload here. User must tap "Submit".
     } catch (e) {
       _showSnack('Could not load video: $e');
       setState(() => _isBusy = false);
@@ -110,14 +128,17 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
 
   Future<void> _uploadVideo(File file) async {
     setState(() {
-      aiFeedback = '';
+      feedbackText = '';
+      metrics = null;
+      errorDetail = null;
       _isBusy = true;
     });
 
     try {
       final req =
           http.MultipartRequest('POST', Uri.parse('$apiBaseUrl/analyze'))
-            ..fields['exercise'] = widget.exercise
+            ..fields['exercise_id'] = widget
+                .exerciseId // <-- pass the slug
             ..files.add(await http.MultipartFile.fromPath('video', file.path));
 
       final streamed = await req.send();
@@ -126,7 +147,29 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
       if (!mounted) return;
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
-        setState(() => aiFeedback = data['agent_feedback'] ?? 'Success');
+
+        if (data['ok'] == true) {
+          setState(() {
+            feedbackText = (data['agent_feedback'] ?? '').toString();
+            metrics = (data['metrics'] as Map?)?.cast<String, dynamic>();
+          });
+        } else {
+          // Show structured error with tips
+          final tips =
+              (data['tips'] as List?)?.map((e) => e.toString()).toList() ??
+              const [];
+          final reason = (data['reason'] ?? 'unknown').toString();
+          setState(() {
+            errorDetail = {'reason': reason, 'tips': tips};
+            feedbackText = [
+              "We couldn’t analyze that video.",
+              if (reason.isNotEmpty) "Reason: $reason",
+              if (tips.isNotEmpty) "",
+              if (tips.isNotEmpty) "Tips:",
+              if (tips.isNotEmpty) ...tips.map((t) => "• $t"),
+            ].join('\n');
+          });
+        }
       } else {
         _showSnack('Backend error: ${res.statusCode}');
       }
@@ -135,6 +178,51 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
     } finally {
       if (mounted) setState(() => _isBusy = false);
     }
+  }
+
+  Widget _buildStatsCard() {
+    if (metrics == null) return const SizedBox.shrink();
+    final summary =
+        (metrics!['summary'] as Map?)?.cast<String, dynamic>() ?? {};
+    final total = summary['total_reps'] ?? 0;
+    final good = summary['good_reps'] ?? 0;
+    final shallow = summary['shallow_reps'] ?? 0;
+    final hipTwist = summary['hip_twist_reps'] ?? 0;
+    final backNotNeutral = summary['back_not_neutral_reps'] ?? 0;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFE0B2),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFFFCC80)),
+      ),
+      child: DefaultTextStyle(
+        style: const TextStyle(fontSize: 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Summary — ${widget.exerciseLabel}',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 16,
+              runSpacing: 6,
+              children: [
+                Text('Total reps: $total'),
+                Text('Good: $good'),
+                Text('Shallow: $shallow'),
+                Text('Hip twist: $hipTwist'),
+                Text('Back not neutral: $backNotNeutral'),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -147,15 +235,14 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Upload • ${widget.exercise}')),
+      appBar: AppBar(title: Text('Upload • ${widget.exerciseLabel}')),
       body: SafeArea(
         child: SingleChildScrollView(
-          // <-- whole page scrollable
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Small preview card with tap-to-play
+              // Preview (tap to play/pause)
               GestureDetector(
                 onTap: () {
                   if (_videoController != null &&
@@ -180,7 +267,7 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
                       ? ConstrainedBox(
                           constraints: const BoxConstraints(maxWidth: 240),
                           child: AspectRatio(
-                            aspectRatio: 14 / 15,
+                            aspectRatio: 20 / 18, // your current chosen shape
                             child: Stack(
                               alignment: Alignment.center,
                               children: [
@@ -247,8 +334,12 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
 
               const SizedBox(height: 16),
 
-              // Feedback panel - now scrolls with the page
-              if (aiFeedback.isNotEmpty)
+              // Stats (if any)
+              if (metrics != null) _buildStatsCard(),
+              if (metrics != null) const SizedBox(height: 12),
+
+              // Feedback or error tips
+              if (feedbackText.isNotEmpty)
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(16),
@@ -258,7 +349,7 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
                     border: Border.all(color: const Color(0xFFFFE0B2)),
                   ),
                   child: Text(
-                    aiFeedback,
+                    feedbackText,
                     style: const TextStyle(fontSize: 16, height: 1.35),
                   ),
                 ),

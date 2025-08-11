@@ -10,7 +10,7 @@ class Exercise {
 // Seed data. You can append freely; UI is dynamic.
 const exercises = <Exercise>[
   // Chest
-  Exercise(id: 'pushups', group: ExerciseGroup.chest, name: 'Push-ups'),
+  Exercise(id: 'pushup', group: ExerciseGroup.chest, name: 'Push-ups'),
   Exercise(id: 'bench_press', group: ExerciseGroup.chest, name: 'Bench Press'),
   Exercise(
     id: 'incline_bench',
