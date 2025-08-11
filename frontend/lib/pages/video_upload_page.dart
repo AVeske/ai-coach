@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -23,11 +25,6 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
   String aiFeedback = '';
   bool _isBusy = false;
 
-  bool get _hasVideo =>
-      _videoFile != null &&
-      _videoController != null &&
-      _videoController!.value.isInitialized;
-
   void _showSnack(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
@@ -44,13 +41,13 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
         _showSnack('No video selected');
         return;
       }
-      await _setVideo(File(picked.path));
+      _setVideo(File(picked.path));
     } catch (e) {
       _showSnack('Failed to pick video: $e');
     }
   }
 
-  Future<void> _recordVideo() async {
+  Future<void> _recordVideoWithCountdown() async {
     try {
       final cameraStatus = await Permission.camera.request();
       final micStatus = await Permission.microphone.request();
@@ -61,6 +58,14 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
         return;
       }
 
+      // Countdown before starting recording
+      await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const CountdownDialog(),
+      );
+      if (!mounted) return;
+
       final picked = await _picker.pickVideo(
         source: ImageSource.camera,
         maxDuration: const Duration(seconds: 30),
@@ -70,7 +75,7 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
         _showSnack('Recording cancelled');
         return;
       }
-      await _setVideo(File(picked.path));
+      _setVideo(File(picked.path));
     } catch (e) {
       _showSnack('Failed to record video: $e');
     }
@@ -78,19 +83,14 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
 
   Future<void> _setVideo(File file) async {
     try {
-      setState(() {
-        _isBusy = true;
-        aiFeedback = '';
-      });
+      setState(() => _isBusy = true);
       _videoFile = file;
       _videoController?.dispose();
-
       final controller = VideoPlayerController.file(file);
       _videoController = controller;
       await controller.initialize();
       if (!mounted) return;
 
-      // Extra guard for max 30s
       if (controller.value.duration > const Duration(seconds: 30)) {
         _showSnack('Video longer than 30s. Please trim and try again.');
         await controller.dispose();
@@ -99,9 +99,9 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
         return;
       }
 
-      controller.setLooping(false);
-      await controller.pause(); // start paused; tap to play
+      controller.setLooping(false); // not auto-looping
       setState(() => _isBusy = false);
+      await _uploadVideo(file);
     } catch (e) {
       _showSnack('Could not load video: $e');
       setState(() => _isBusy = false);
@@ -125,7 +125,8 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
 
       if (!mounted) return;
       if (res.statusCode == 200) {
-        setState(() => aiFeedback = res.body);
+        final data = jsonDecode(res.body);
+        setState(() => aiFeedback = data['agent_feedback'] ?? 'Success');
       } else {
         _showSnack('Backend error: ${res.statusCode}');
       }
@@ -148,17 +149,21 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
     return Scaffold(
       appBar: AppBar(title: Text('Upload • ${widget.exercise}')),
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
+          // <-- whole page scrollable
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Compact, portrait-style preview (tap to play/pause)
+              // Small preview card with tap-to-play
               GestureDetector(
                 onTap: () {
-                  if (_hasVideo) {
-                    final v = _videoController!;
-                    v.value.isPlaying ? v.pause() : v.play();
+                  if (_videoController != null &&
+                      _videoController!.value.isInitialized) {
+                    final controller = _videoController!;
+                    controller.value.isPlaying
+                        ? controller.pause()
+                        : controller.play();
                     setState(() {});
                   }
                 },
@@ -168,44 +173,42 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: const Color(0xFFFFCC80)),
                   ),
-                  padding: const EdgeInsets.all(8),
-                  child: Center(
-                    child: _hasVideo
-                        ? ConstrainedBox(
-                            // ↓ make preview smaller/wider by changing maxWidth
-                            constraints: const BoxConstraints(maxWidth: 240),
-                            child: AspectRatio(
-                              // ↓ change this to adjust shape (e.g., 3/4, 9/16, 2/3)
-                              aspectRatio: 14 / 15,
-                              child: Stack(
-                                alignment: Alignment.center,
-                                children: [
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: VideoPlayer(_videoController!),
-                                  ),
-                                  if (!_videoController!.value.isPlaying)
-                                    Container(
-                                      decoration: const BoxDecoration(
-                                        color: Color(0x40000000), // ~25% black
-                                        shape: BoxShape.circle,
-                                      ),
-                                      padding: const EdgeInsets.all(12),
-                                      child: const Icon(
-                                        Icons.play_arrow,
-                                        size: 40,
-                                        color: Colors.white,
-                                      ),
+                  padding: const EdgeInsets.all(12),
+                  child:
+                      _videoController != null &&
+                          _videoController!.value.isInitialized
+                      ? ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 240),
+                          child: AspectRatio(
+                            aspectRatio: 14 / 15,
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: VideoPlayer(_videoController!),
+                                ),
+                                if (!_videoController!.value.isPlaying)
+                                  Container(
+                                    decoration: const BoxDecoration(
+                                      color: Color(0x40000000),
+                                      shape: BoxShape.circle,
                                     ),
-                                ],
-                              ),
+                                    padding: const EdgeInsets.all(12),
+                                    child: const Icon(
+                                      Icons.play_arrow,
+                                      size: 40,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                              ],
                             ),
-                          )
-                        : const SizedBox(
-                            height: 140,
-                            child: Center(child: Text('No video selected')),
                           ),
-                  ),
+                        )
+                      : const SizedBox(
+                          height: 140,
+                          child: Center(child: Text('No video selected')),
+                        ),
                 ),
               ),
 
@@ -213,14 +216,13 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
               if (_isBusy) const LinearProgressIndicator(),
               const SizedBox(height: 12),
 
-              // Pick/Record row
               Row(
                 children: [
                   Expanded(
                     child: ElevatedButton.icon(
-                      onPressed: _isBusy ? null : _recordVideo,
+                      onPressed: _isBusy ? null : _recordVideoWithCountdown,
                       icon: const Icon(Icons.videocam),
-                      label: const Text('Record'),
+                      label: const Text('Record (max 30s)'),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -228,7 +230,7 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
                     child: ElevatedButton.icon(
                       onPressed: _isBusy ? null : _pickVideo,
                       icon: const Icon(Icons.upload_file),
-                      label: const Text('Upload'),
+                      label: const Text('Upload from Gallery'),
                     ),
                   ),
                 ],
@@ -236,41 +238,74 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
 
               const SizedBox(height: 16),
 
-              // Submit only after a video is ready and not busy and no feedback yet
-              if (_hasVideo && !_isBusy && aiFeedback.isEmpty)
+              if (_videoFile != null && !_isBusy)
                 ElevatedButton.icon(
                   onPressed: () => _uploadVideo(_videoFile!),
                   icon: const Icon(Icons.send),
-                  label: const Text('Submit for Feedback'),
-                  style: ElevatedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(48),
-                  ),
+                  label: const Text('Submit for Upload'),
                 ),
 
               const SizedBox(height: 16),
 
-              // Feedback panel
+              // Feedback panel - now scrolls with the page
               if (aiFeedback.isNotEmpty)
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFFCC80),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFFFFE0B2)),
-                    ),
-                    child: SingleChildScrollView(
-                      child: Text(
-                        aiFeedback,
-                        style: const TextStyle(fontSize: 16, height: 1.35),
-                      ),
-                    ),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFCC80),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFFFE0B2)),
+                  ),
+                  child: Text(
+                    aiFeedback,
+                    style: const TextStyle(fontSize: 16, height: 1.35),
                   ),
                 ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class CountdownDialog extends StatefulWidget {
+  const CountdownDialog({super.key});
+
+  @override
+  State<CountdownDialog> createState() => _CountdownDialogState();
+}
+
+class _CountdownDialogState extends State<CountdownDialog> {
+  int secondsLeft = 5;
+
+  @override
+  void initState() {
+    super.initState();
+    _startCountdown();
+  }
+
+  void _startCountdown() {
+    Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (secondsLeft == 1) {
+        timer.cancel();
+        Navigator.of(context).pop();
+      } else {
+        setState(() => secondsLeft--);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Get Ready'),
+      content: Text('$secondsLeft…'),
     );
   }
 }
