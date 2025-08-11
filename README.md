@@ -20,3 +20,5 @@
 # Day3:
 
 ### 1. Started python backend to get the model and analyze video
+
+### 2. Added the 1st AI-agent. -> Need to work on more specific feedback!!
