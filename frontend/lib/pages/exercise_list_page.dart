@@ -18,10 +18,7 @@ class _ExerciseListPageState extends State<ExerciseListPage> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => VideoUploadPage(
-          exerciseId: ex.id, // <-- slug like "pushup"
-          exerciseLabel: ex.name, // <-- pretty label, e.g. "Push-ups"
-        ),
+        builder: (_) => VideoUploadPage(exercise: ex.id), // slug e.g. "pushup"
       ),
     );
   }
