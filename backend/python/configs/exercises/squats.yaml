@@ -1,0 +1,31 @@
+events:
+  peak_is_top: true
+  min_peak_distance_frames: 0.35s
+  min_rep_duration_s: 0.55
+  max_rep_duration_s: 7.5
+  prominence_std: 0.18
+  width_sec: 0.08
+
+metrics:
+  rom_deg: # knee ROM
+    kind: rom
+    tiers:
+      optimal: [60, 999]
+      acceptable: [45, 60]
+      suboptimal: [0, 45]
+  back_neutral_deg:
+    kind: angle_at
+    at: bottom
+    series_hint: back
+    tiers:
+      optimal: [165, 190]
+      acceptable: [150, 165]
+      suboptimal: [0, 150]
+  tempo_s:
+    kind: tempo
+    tiers:
+      optimal: [1.0, 3.5]
+      acceptable: [0.6, 1.0]
+      suboptimal: [0.0, 0.6]
+
+bad_flags: [suboptimal]

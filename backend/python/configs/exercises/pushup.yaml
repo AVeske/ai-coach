@@ -1,30 +1,31 @@
-meta:
-  name: Push-up
-  plane: sagittal
-  joints:
-    primary: [left_elbow, right_elbow]
-    posture:
-      [
-        left_hip,
-        right_hip,
-        left_shoulder,
-        right_shoulder,
-        left_ankle,
-        right_ankle,
-      ]
+events:
+  peak_is_top: true
+  min_peak_distance_frames: 0.30s
+  min_rep_duration_s: 0.40
+  max_rep_duration_s: 7.0
+  prominence_std: 0.18
+  width_sec: 0.08
 
-thresholds:
-  elbow_min_deg: 60 # bottom angle target (smaller = deeper)
-  elbow_ok_range: [60, 100]
-  hip_level_max_diff: 0.05 # |y(left_hip) - y(right_hip)| normalized
-  back_neutral_range_deg: [165, 180] # shoulder-hip-ankle angle
-  rep_depth_min_deg: 110 # ROM (elbow max - min) must exceed this to count
-  min_rep_duration_s: 0.5
-  max_rep_duration_s: 6.0
+metrics:
+  rom_deg: # elbow ROM (top − bottom)
+    kind: rom
+    tiers:
+      optimal: [90, 999]
+      acceptable: [70, 90]
+      suboptimal: [0, 70]
+  back_neutral_deg: # back angle at bottom
+    kind: angle_at
+    at: bottom
+    series_hint: back
+    tiers:
+      optimal: [170, 190]
+      acceptable: [160, 170]
+      suboptimal: [0, 160]
+  tempo_s:
+    kind: tempo
+    tiers:
+      optimal: [0.8, 3.0]
+      acceptable: [0.5, 0.8]
+      suboptimal: [0.0, 0.5]
 
-cues:
-  depth_low: "Get deeper—bend elbows more at the bottom."
-  depth_high: "You may be going too deep; stop around 90°."
-  hip_twist: "Keep hips level—avoid twisting."
-  back_arch: "Keep a neutral spine. Don’t overextend or sag."
-  good_rep: "Solid rep: depth and posture look good."
+bad_flags: [suboptimal]
