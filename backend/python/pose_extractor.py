@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import csv
 import cv2
-import math
 import time
 import numpy as np
 from typing import Dict, Any, List, Tuple, Optional
