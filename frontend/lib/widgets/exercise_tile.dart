@@ -3,7 +3,16 @@ import 'package:flutter/material.dart';
 class ExerciseTile extends StatelessWidget {
   final String title;
   final VoidCallback onTap;
-  const ExerciseTile({super.key, required this.title, required this.onTap});
+  final VoidCallback? onInfo; // NEW
+  final String infoTooltip; // NEW
+
+  const ExerciseTile({
+    super.key,
+    required this.title,
+    required this.onTap,
+    this.onInfo,
+    this.infoTooltip = 'Filming tip',
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -30,6 +39,12 @@ class ExerciseTile extends StatelessWidget {
                   ),
                 ),
               ),
+              if (onInfo != null)
+                IconButton(
+                  tooltip: infoTooltip,
+                  icon: const Icon(Icons.info_outline),
+                  onPressed: onInfo,
+                ),
               Icon(
                 Icons.arrow_forward_ios,
                 size: 16,

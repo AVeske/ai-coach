@@ -4,61 +4,91 @@ class Exercise {
   final String id;
   final ExerciseGroup group;
   final String name;
-  const Exercise({required this.id, required this.group, required this.name});
+  final String tip;
+  const Exercise({
+    required this.id,
+    required this.group,
+    required this.name,
+    this.tip = "",
+  });
 }
 
 // Seed data. You can append freely; UI is dynamic.
 const exercises = <Exercise>[
-  // Chest
-  Exercise(id: 'pushup', group: ExerciseGroup.chest, name: 'Push-ups'),
-  Exercise(id: 'bench_press', group: ExerciseGroup.chest, name: 'Bench Press'),
+  Exercise(
+    id: 'pushup',
+    group: ExerciseGroup.chest,
+    name: 'Push-ups',
+    tip: 'Side view at chest height.',
+  ),
+  Exercise(
+    id: 'bench_press',
+    group: ExerciseGroup.chest,
+    name: 'Bench Press',
+    tip: 'Side view from bench height.',
+  ),
   Exercise(
     id: 'incline_bench',
     group: ExerciseGroup.chest,
     name: 'Incline Bench Press',
+    tip: 'Side view from bench height.',
   ),
 
-  // Back
-  Exercise(id: 'pull_ups', group: ExerciseGroup.back, name: 'Pull-ups'),
+  Exercise(
+    id: 'pull_ups',
+    group: ExerciseGroup.back,
+    name: 'Pull-ups',
+    tip: 'Side view near the bar.',
+  ),
   Exercise(
     id: 'bent_over_rows',
     group: ExerciseGroup.back,
     name: 'Bent-over Rows',
+    tip: 'Side view at torso height.',
   ),
   Exercise(
     id: 'lat_pulldown',
     group: ExerciseGroup.back,
     name: 'Lat Pulldowns',
+    tip: '45° front-side or side.',
   ),
 
-  // Arms
   Exercise(
     id: 'standing_curl',
     group: ExerciseGroup.arms,
     name: 'Standing Bicep Curls',
+    tip: 'Side view on working arm.',
   ),
   Exercise(
     id: 'tricep_extensions',
     group: ExerciseGroup.arms,
     name: 'Tricep Extensions',
+    tip: 'Side view, elbow clearly visible.',
   ),
   Exercise(
     id: 'preacher_curls',
     group: ExerciseGroup.arms,
     name: 'Preacher Curls',
+    tip: 'Side view on working arm.',
   ),
 
-  // Legs
-  Exercise(id: 'squats', group: ExerciseGroup.legs, name: 'Squats'),
+  Exercise(
+    id: 'squats',
+    group: ExerciseGroup.legs,
+    name: 'Squats',
+    tip: 'Side view at hip height.',
+  ),
   Exercise(
     id: 'leg_extensions',
     group: ExerciseGroup.legs,
     name: 'Leg Extensions',
+    tip: 'Side view on the moving leg.',
   ),
   Exercise(
     id: 'hamstring_curls',
     group: ExerciseGroup.legs,
     name: 'Hamstring Curls',
+    tip: 'Side view on the moving leg.',
   ),
 ];
 

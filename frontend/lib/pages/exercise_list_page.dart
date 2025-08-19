@@ -17,8 +17,25 @@ class _ExerciseListPageState extends State<ExerciseListPage> {
   void _openExercise(Exercise ex) {
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => VideoUploadPage(exercise: ex.id), // slug e.g. "pushup"
+      MaterialPageRoute(builder: (_) => VideoUploadPage(exercise: ex.id)),
+    );
+  }
+
+  void _showTip(Exercise ex) {
+    final tip = ex.tip.isEmpty
+        ? 'Use a steady side view with good lighting.'
+        : ex.tip;
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Filming tip'),
+        content: Text(tip),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
       ),
     );
   }
@@ -49,10 +66,14 @@ class _ExerciseListPageState extends State<ExerciseListPage> {
                 child: ListView.separated(
                   itemCount: visible.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 10),
-                  itemBuilder: (_, i) => ExerciseTile(
-                    title: visible[i].name,
-                    onTap: () => _openExercise(visible[i]),
-                  ),
+                  itemBuilder: (_, i) {
+                    final e = visible[i];
+                    return ExerciseTile(
+                      title: e.name,
+                      onTap: () => _openExercise(e),
+                      onInfo: () => _showTip(e), // NEW
+                    );
+                  },
                 ),
               ),
             ],

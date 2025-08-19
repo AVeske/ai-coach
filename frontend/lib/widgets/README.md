@@ -21,6 +21,7 @@
 - **Fields**:
   - `title`: label to display (exercise name).
   - `onTap`: Function exercuted when tile is tapped (navigation, etc.)
+  - `onInfo`: Adds a info button on how to correctly film for best result.(from `exercise.dart`)
 
 ### `build()` Method
 

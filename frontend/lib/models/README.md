@@ -19,6 +19,7 @@ Defines the **core exercise model** and related utilities:
   - `id`: unique identifier (used interally, API calls, YAML configs).
   - `group`: `ExerciseGroup` enum (muscle group).
   - `name`: User-friendly label displayed in UI.
+  - `tip`: A quick and helpful tip on how to film for maximum effiency
 - **const constructor**: Makes objects immutable and useable in compile-time constants.
 - Instances are created as constants in the seed data.
 
