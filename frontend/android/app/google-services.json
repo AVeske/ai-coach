@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "829238117521",
+    "project_id": "ai-coach-e80ec",
+    "storage_bucket": "ai-coach-e80ec.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:829238117521:android:0c8738b00404e88f32eb30",
+        "android_client_info": {
+          "package_name": "com.barbellum.aicoach"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "829238117521-bdf9rpr7cfi8dlopgveonn60s3ja9c0r.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.barbellum.aicoach",
+            "certificate_hash": "0edac30e60b1bcaf845b1b71a87cf65dd49b5cd3"
+          }
+        },
+        {
+          "client_id": "829238117521-h2adsmlgoi9cme1aoa9k5fouqf9lpl4p.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBx31d-a1su1MQM3xpZ5wCMP9Q7_i0XqXE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "829238117521-h2adsmlgoi9cme1aoa9k5fouqf9lpl4p.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

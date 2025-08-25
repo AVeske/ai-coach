@@ -1,83 +1,128 @@
 import 'package:flutter/material.dart';
-import '../models/exercise.dart';
-import 'exercise_list_page.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+
+import 'exercise_groups_page.dart';
+import 'history_page.dart';
+import 'profile_page.dart';
 
 class HomePage extends StatelessWidget {
-  const HomePage({super.key});
+  final ThemeMode currentMode;
+  final void Function(ThemeMode) onChangeTheme;
+  const HomePage({
+    super.key,
+    required this.currentMode,
+    required this.onChangeTheme,
+  });
 
-  void _openGroup(BuildContext context, ExerciseGroup group) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => ExerciseListPage(group: group)),
-    );
+  Future<void> _logout(BuildContext ctx) async {
+    try {
+      await GoogleSignIn().signOut();
+    } catch (_) {}
+    await FirebaseAuth.instance.signOut();
+    if (ctx.mounted) {
+      ScaffoldMessenger.of(
+        ctx,
+      ).showSnackBar(const SnackBar(content: Text('Signed out')));
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final groups = ExerciseGroup.values;
     return Scaffold(
-      appBar: AppBar(title: const Text('AI Coach')),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Select a body part',
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 12),
-              Expanded(
-                child: GridView.builder(
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    crossAxisSpacing: 12,
-                    mainAxisSpacing: 12,
-                    childAspectRatio: 1.15,
-                  ),
-                  itemCount: groups.length,
-                  itemBuilder: (_, i) {
-                    final g = groups[i];
-                    return _GroupCard(
-                      title: groupLabel(g),
-                      onTap: () => _openGroup(context, g),
-                    );
-                  },
-                ),
-              ),
+      appBar: AppBar(
+        title: const Text('AI Coach'),
+        actions: [
+          PopupMenuButton<String>(
+            onSelected: (v) {
+              switch (v) {
+                case 'light':
+                  onChangeTheme(ThemeMode.light);
+                  break;
+                case 'dark':
+                  onChangeTheme(ThemeMode.dark);
+                  break;
+                case 'system':
+                  onChangeTheme(ThemeMode.system);
+                  break;
+                case 'logout':
+                  _logout(context);
+                  break;
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'light', child: Text('Light theme')),
+              PopupMenuItem(value: 'dark', child: Text('Dark theme')),
+              PopupMenuItem(value: 'system', child: Text('System theme')),
+              PopupMenuDivider(),
+              PopupMenuItem(value: 'logout', child: Text('Sign out')),
             ],
           ),
+        ],
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: GridView.count(
+          crossAxisCount: 2,
+          crossAxisSpacing: 12,
+          mainAxisSpacing: 12,
+          children: [
+            _tile(
+              context,
+              icon: Icons.fitness_center,
+              label: 'Choose exercise',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ExerciseGroupsPage()),
+              ),
+            ),
+            _tile(
+              context,
+              icon: Icons.history,
+              label: 'History',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const HistoryPage()),
+              ),
+            ),
+            _tile(
+              context,
+              icon: Icons.person,
+              label: 'Profile',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ProfilePage()),
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
-}
 
-class _GroupCard extends StatelessWidget {
-  final String title;
-  final VoidCallback onTap;
-  const _GroupCard({required this.title, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _tile(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    final color = Theme.of(context).colorScheme.primary;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
       child: Ink(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
-          gradient: LinearGradient(
-            colors: [Color(0xFF9C6410), Color(0xFF744B0D)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-          border: Border.all(color: Color(0xFF70542A)),
+          border: Border.all(color: color.withOpacity(0.25)),
         ),
         child: Center(
-          child: Text(
-            title,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 36, color: color),
+              const SizedBox(height: 8),
+              Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+            ],
           ),
         ),
       ),

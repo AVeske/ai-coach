@@ -1,4 +1,4 @@
-package com.example.frontend
+package com.barbellum.aicoach
 
 import io.flutter.embedding.android.FlutterActivity
 

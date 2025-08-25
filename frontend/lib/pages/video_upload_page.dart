@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:video_player/video_player.dart';
 import 'package:http/http.dart' as http;
+import 'package:firebase_auth/firebase_auth.dart';
 
 import '../config.dart';
 
@@ -91,13 +92,37 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
         return;
       }
 
-      controller.setLooping(false); // tap to play/pause
+      controller.setLooping(false);
       setState(() => _isBusy = false);
-      // No auto-upload — user must press Submit.
     } catch (e) {
       _showSnack('Could not load video: $e');
       setState(() => _isBusy = false);
     }
+  }
+
+  String _buildFallbackFeedback(Map<String, dynamic> data) {
+    final metrics = (data['metrics'] as Map?)?.cast<String, dynamic>();
+    final summary = (metrics?['summary'] as Map?)?.cast<String, dynamic>();
+    if (summary != null) {
+      final total = summary['total_reps'] ?? 0;
+      final good = summary['good_reps'] ?? 0;
+      final bad = summary['bad_reps'] ?? 0;
+      final lines = <String>[
+        '${widget.exercise}: $total reps • $good good • $bad needs work.',
+      ];
+      final reps = (metrics?['reps'] as List?)?.cast<dynamic>() ?? const [];
+      for (var i = 0; i < reps.length; i++) {
+        final r = (reps[i] as Map).cast<String, dynamic>();
+        final flags = (r['flags'] as List?)?.cast<dynamic>() ?? const [];
+        if (flags.isNotEmpty) lines.add('Rep ${i + 1}: ${flags.join(", ")}');
+      }
+      return lines.join('\n');
+    }
+    final msg = data['message']?.toString();
+    final reason = data['reason']?.toString();
+    if (msg != null && reason != null) return '$msg ($reason)';
+    if (msg != null) return msg;
+    return 'No feedback';
   }
 
   Future<void> _uploadVideo(File file) async {
@@ -107,20 +132,48 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
     });
 
     try {
+      final user = FirebaseAuth.instance.currentUser;
+      final idToken = user != null ? await user.getIdToken() : null;
+
       final req =
           http.MultipartRequest('POST', Uri.parse('$apiBaseUrl/analyze'))
             ..fields['exercise_id'] = widget.exercise
             ..files.add(await http.MultipartFile.fromPath('video', file.path));
 
+      if (idToken != null) req.headers['Authorization'] = 'Bearer $idToken';
+
       final streamed = await req.send();
       final res = await http.Response.fromStream(streamed);
+      final body = utf8.decode(res.bodyBytes);
 
       if (!mounted) return;
       if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        setState(() => aiFeedback = data['agent_feedback'] ?? 'Success');
+        Map<String, dynamic> data;
+        try {
+          data = jsonDecode(body) as Map<String, dynamic>;
+        } catch (_) {
+          setState(() => aiFeedback = 'Parse error: invalid JSON');
+          return;
+        }
+        final agent = (data['agent_feedback'] as String?)?.trim();
+        setState(() {
+          aiFeedback = (agent != null && agent.isNotEmpty)
+              ? agent
+              : _buildFallbackFeedback(data);
+        });
       } else {
-        _showSnack('Backend error: ${res.statusCode}');
+        try {
+          final err = jsonDecode(body) as Map<String, dynamic>;
+          final msg = err['message']?.toString();
+          final reason = err['reason']?.toString();
+          setState(
+            () => aiFeedback = (msg != null && reason != null)
+                ? '$msg ($reason)'
+                : (msg ?? 'Backend error ${res.statusCode}'),
+          );
+        } catch (_) {
+          setState(() => aiFeedback = 'Backend error ${res.statusCode}');
+        }
       }
     } catch (e) {
       _showSnack('Upload failed: $e');
@@ -181,11 +234,9 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
                         ),
                 ),
               ),
-
               const SizedBox(height: 12),
               if (_isBusy) const LinearProgressIndicator(),
               const SizedBox(height: 12),
-
               Row(
                 children: [
                   Expanded(
@@ -205,18 +256,14 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
                   ),
                 ],
               ),
-
               const SizedBox(height: 16),
-
               if (_videoFile != null && !_isBusy)
                 ElevatedButton.icon(
                   onPressed: () => _uploadVideo(_videoFile!),
                   icon: const Icon(Icons.send),
                   label: const Text('Submit for Upload'),
                 ),
-
               const SizedBox(height: 16),
-
               if (aiFeedback.isNotEmpty)
                 Container(
                   width: double.infinity,
