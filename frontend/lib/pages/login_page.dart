@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import '../services/db.dart'; // NEW
 
 class LoginPage extends StatelessWidget {
   const LoginPage({super.key});
@@ -15,6 +16,7 @@ class LoginPage extends StatelessWidget {
         accessToken: ga.accessToken,
       );
       await FirebaseAuth.instance.signInWithCredential(cred);
+      await Db.createProfileIfMissing(); // NEW: create/patch user doc
     } catch (e) {
       if (ctx.mounted) {
         ScaffoldMessenger.of(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/exercise.dart';
 import '../widgets/exercise_tile.dart';
 import 'video_upload_page.dart';
+import 'exercise_wiki_detail_page.dart'; // ← NEW
 
 class ExerciseListPage extends StatefulWidget {
   final ExerciseGroup group;
@@ -25,15 +26,29 @@ class _ExerciseListPageState extends State<ExerciseListPage> {
     final tip = ex.tip.isEmpty
         ? 'Use a steady side view with good lighting.'
         : ex.tip;
+
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Filming tip'),
+        title: Text('${ex.name} • Filming tip'),
         content: Text(tip),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
+            child: const Text('Close'),
+          ),
+          TextButton(
+            // Close the dialog, then push the wiki detail
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ExerciseWikiDetailPage(exercise: ex),
+                ),
+              );
+            },
+            child: const Text('Open wiki'),
           ),
         ],
       ),
@@ -71,7 +86,7 @@ class _ExerciseListPageState extends State<ExerciseListPage> {
                     return ExerciseTile(
                       title: e.name,
                       onTap: () => _openExercise(e),
-                      onInfo: () => _showTip(e), // NEW
+                      onInfo: () => _showTip(e), // now opens wiki from dialog
                     );
                   },
                 ),

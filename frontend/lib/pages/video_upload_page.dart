@@ -1,3 +1,4 @@
+// frontend/lib/pages/video_upload_page.dart
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -10,6 +11,7 @@ import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../config.dart';
+import '../services/db.dart';
 
 class VideoUploadPage extends StatefulWidget {
   final String exercise; // slug e.g. "pushup"
@@ -23,8 +25,10 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
   final ImagePicker _picker = ImagePicker();
   File? _videoFile;
   VideoPlayerController? _videoController;
+
   String aiFeedback = '';
   bool _isBusy = false;
+  bool _submitted = false;
 
   void _showSnack(String msg) {
     if (!mounted) return;
@@ -76,7 +80,11 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
 
   Future<void> _setVideo(File file) async {
     try {
-      setState(() => _isBusy = true);
+      setState(() {
+        _isBusy = true;
+        _submitted = false; // new clip resets submit lock
+        aiFeedback = '';
+      });
       _videoFile = file;
       _videoController?.dispose();
       final controller = VideoPlayerController.file(file);
@@ -155,11 +163,35 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
           setState(() => aiFeedback = 'Parse error: invalid JSON');
           return;
         }
+
+        // Prefer agent feedback, else fallback we build locally
         final agent = (data['agent_feedback'] as String?)?.trim();
+        final metrics = (data['metrics'] as Map?)?.cast<String, dynamic>();
+        final summary = (metrics?['summary'] as Map?)?.cast<String, dynamic>();
+        final total = summary?['total_reps'] ?? 0;
+        final good = summary?['good_reps'] ?? 0;
+        final bad = summary?['bad_reps'] ?? 0;
+        final oneLine =
+            '${widget.exercise}: $total reps • $good good • $bad needs work.';
+
+        final feedbackText = (agent != null && agent.isNotEmpty)
+            ? agent
+            : _buildFallbackFeedback(data);
+
+        // Save to Firestore History
+        await Db.addSession(
+          exerciseId: widget.exercise,
+          repsCount: total is int ? total : int.tryParse('$total') ?? 0,
+          goodReps: good is int ? good : int.tryParse('$good') ?? 0,
+          badReps: bad is int ? bad : int.tryParse('$bad') ?? 0,
+          feedbackSummary: oneLine,
+          feedbackFull: feedbackText,
+          rawMetrics: metrics, // remove if you don't want to store this
+        );
+
         setState(() {
-          aiFeedback = (agent != null && agent.isNotEmpty)
-              ? agent
-              : _buildFallbackFeedback(data);
+          aiFeedback = feedbackText;
+          _submitted = true; // lock UI
         });
       } else {
         try {
@@ -237,11 +269,13 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
               const SizedBox(height: 12),
               if (_isBusy) const LinearProgressIndicator(),
               const SizedBox(height: 12),
+
+              // Record / Upload row
               Row(
                 children: [
                   Expanded(
                     child: ElevatedButton.icon(
-                      onPressed: _isBusy ? null : _recordVideo,
+                      onPressed: (_isBusy || _submitted) ? null : _recordVideo,
                       icon: const Icon(Icons.videocam),
                       label: const Text('Record (max 30s)'),
                     ),
@@ -249,21 +283,27 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: ElevatedButton.icon(
-                      onPressed: _isBusy ? null : _pickVideo,
+                      onPressed: (_isBusy || _submitted) ? null : _pickVideo,
                       icon: const Icon(Icons.upload_file),
                       label: const Text('Upload from Gallery'),
                     ),
                   ),
                 ],
               ),
+
               const SizedBox(height: 16),
+
               if (_videoFile != null && !_isBusy)
                 ElevatedButton.icon(
-                  onPressed: () => _uploadVideo(_videoFile!),
+                  onPressed: _submitted
+                      ? null
+                      : () => _uploadVideo(_videoFile!),
                   icon: const Icon(Icons.send),
                   label: const Text('Submit for Upload'),
                 ),
+
               const SizedBox(height: 16),
+
               if (aiFeedback.isNotEmpty)
                 Container(
                   width: double.infinity,
@@ -276,6 +316,19 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
                   child: Text(
                     aiFeedback,
                     style: const TextStyle(fontSize: 16, height: 1.35),
+                  ),
+                ),
+
+              if (_submitted)
+                Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.restart_alt),
+                    label: const Text('Start new exercise'),
+                    onPressed: () {
+                      if (!mounted) return;
+                      Navigator.pop(context); // back to exercise list
+                    },
                   ),
                 ),
             ],

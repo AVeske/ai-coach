@@ -5,6 +5,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'exercise_groups_page.dart';
 import 'history_page.dart';
 import 'profile_page.dart';
+import 'exercise_wiki_page.dart';
 
 class HomePage extends StatelessWidget {
   final ThemeMode currentMode;
@@ -92,6 +93,15 @@ class HomePage extends StatelessWidget {
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const ProfilePage()),
+              ),
+            ),
+            _tile(
+              context,
+              icon: Icons.menu_book_rounded,
+              label: 'Exercise Wiki',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const WikiPage()),
               ),
             ),
           ],

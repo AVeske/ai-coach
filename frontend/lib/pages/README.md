@@ -73,7 +73,7 @@ Screen that shows all exercises for a selected **muscle group**, provides a **se
 
 - `SafeArea`: Adds padding to avoid notches, status bar, and system UI intrusions.
 
-# **home_page.dart**
+# **exercise_group_page.dart**
 
 This file defines the **Home Page** of the AI Coach app. It acts as the entry point after launch, where the user selects which body part (exercise group) they want to train.
 It consists of two main widgets:

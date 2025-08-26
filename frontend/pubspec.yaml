@@ -19,11 +19,21 @@ dependencies:
   cloud_firestore: ^4.15.8
   google_sign_in: ^6.2.1
   sign_in_with_apple: ^6.1.0
+  shared_preferences: ^2.3.2
+  country_picker: ^2.0.25
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon.png"
+  adaptive_icon_background: "#000000"
+  adaptive_icon_foreground: "assets/icon.png"
 
 flutter:
   uses-material-design: true
