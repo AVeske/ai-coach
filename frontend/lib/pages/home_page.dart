@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:frontend/pages/subscription_page.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
 import 'exercise_groups_page.dart';
@@ -102,6 +103,15 @@ class HomePage extends StatelessWidget {
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const WikiPage()),
+              ),
+            ),
+            _tile(
+              context,
+              icon: Icons.workspace_premium_rounded,
+              label: 'Subscription',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SubscriptionPage()),
               ),
             ),
           ],

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:cloud_firestore/cloud_firestore.dart'; // for stream types
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -28,7 +29,7 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
 
   String aiFeedback = '';
   bool _isBusy = false;
-  bool _submitted = false;
+  bool _submitted = false; // after success, lock controls
 
   void _showSnack(String msg) {
     if (!mounted) return;
@@ -166,33 +167,41 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
 
         // Prefer agent feedback, else fallback we build locally
         final agent = (data['agent_feedback'] as String?)?.trim();
-        final metrics = (data['metrics'] as Map?)?.cast<String, dynamic>();
-        final summary = (metrics?['summary'] as Map?)?.cast<String, dynamic>();
-        final total = summary?['total_reps'] ?? 0;
-        final good = summary?['good_reps'] ?? 0;
-        final bad = summary?['bad_reps'] ?? 0;
-        final oneLine =
-            '${widget.exercise}: $total reps • $good good • $bad needs work.';
-
         final feedbackText = (agent != null && agent.isNotEmpty)
             ? agent
             : _buildFallbackFeedback(data);
 
-        // Save to Firestore History
-        await Db.addSession(
-          exerciseId: widget.exercise,
-          repsCount: total is int ? total : int.tryParse('$total') ?? 0,
-          goodReps: good is int ? good : int.tryParse('$good') ?? 0,
-          badReps: bad is int ? bad : int.tryParse('$bad') ?? 0,
-          feedbackSummary: oneLine,
-          feedbackFull: feedbackText,
-          rawMetrics: metrics, // remove if you don't want to store this
-        );
+        // Only consider it "valid" if backend says so (so History isn't polluted)
+        final isValid =
+            (data['ok'] == true) &&
+            (data['analysis_ok'] == true) &&
+            (data['metrics'] is Map);
 
         setState(() {
           aiFeedback = feedbackText;
-          _submitted = true; // lock UI
+          _submitted = isValid; // lock UI only if a valid analysis came back
         });
+
+        if (isValid) {
+          final metrics = (data['metrics'] as Map).cast<String, dynamic>();
+          final summary =
+              (metrics['summary'] as Map?)?.cast<String, dynamic>() ?? {};
+          final total = summary['total_reps'] ?? 0;
+          final good = summary['good_reps'] ?? 0;
+          final bad = summary['bad_reps'] ?? 0;
+
+          final oneLine =
+              '${widget.exercise}: $total reps • $good good • $bad needs work.';
+
+          await Db.addSuccessfulSession(
+            exerciseId: widget.exercise,
+            repsCount: total is int ? total : int.tryParse('$total') ?? 0,
+            goodReps: good is int ? good : int.tryParse('$good') ?? 0,
+            badReps: bad is int ? bad : int.tryParse('$bad') ?? 0,
+            feedbackSummary: oneLine,
+            feedbackFull: feedbackText,
+          );
+        }
       } else {
         try {
           final err = jsonDecode(body) as Map<String, dynamic>;
@@ -223,6 +232,8 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
 
   @override
   Widget build(BuildContext context) {
+    final controlsDisabled = _isBusy || _submitted;
+
     return Scaffold(
       appBar: AppBar(title: Text('Upload • ${widget.exercise}')),
       body: SafeArea(
@@ -231,6 +242,31 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // NEW: plan + today counter (display-only, not enforced)
+              StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                stream: Db.streamUserDoc(),
+                builder: (_, s1) {
+                  final data = s1.data?.data() ?? {};
+                  final plan = Db.effectivePlanFrom(data);
+                  return StreamBuilder<int>(
+                    stream: Db.streamMySessionsTodayCount(),
+                    builder: (_, s2) {
+                      final used = s2.data ?? 0;
+                      final label =
+                          'Plan: $plan  •  Analyses today: $used / 3 (not enforced)';
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          label,
+                          style: Theme.of(context).textTheme.labelMedium,
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+
+              // Preview
               GestureDetector(
                 onTap: () {
                   if (_videoController != null &&
@@ -267,15 +303,25 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
                 ),
               ),
               const SizedBox(height: 12),
-              if (_isBusy) const LinearProgressIndicator(),
-              const SizedBox(height: 12),
 
-              // Record / Upload row
+              // Loading UI (progress + friendly message)
+              if (_isBusy) ...[
+                const LinearProgressIndicator(),
+                const SizedBox(height: 8),
+                Text(
+                  'Your video is being sent to the Coach for analysis...',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 12),
+              ],
+
+              // Record / Upload
               Row(
                 children: [
                   Expanded(
                     child: ElevatedButton.icon(
-                      onPressed: (_isBusy || _submitted) ? null : _recordVideo,
+                      onPressed: controlsDisabled ? null : _recordVideo,
                       icon: const Icon(Icons.videocam),
                       label: const Text('Record (max 30s)'),
                     ),
@@ -283,7 +329,7 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: ElevatedButton.icon(
-                      onPressed: (_isBusy || _submitted) ? null : _pickVideo,
+                      onPressed: controlsDisabled ? null : _pickVideo,
                       icon: const Icon(Icons.upload_file),
                       label: const Text('Upload from Gallery'),
                     ),

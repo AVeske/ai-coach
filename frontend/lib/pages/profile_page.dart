@@ -2,7 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../services/db.dart';
-import 'profile_setup_page.dart';
+import 'profile_edit_page.dart';
 import 'calibration_intro_page.dart';
 
 class ProfilePage extends StatelessWidget {
@@ -17,71 +17,158 @@ class ProfilePage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Profile')),
       body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-        stream: Db.userDoc(u.uid).snapshots(),
+        stream: Db.streamUserDoc(),
         builder: (_, snap) {
           if (!snap.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          final d = snap.data!.data() ?? {};
-          final sub = (d['subscription'] as Map?) ?? {};
-          return Padding(
+          final data = snap.data!.data() ?? {};
+          final subscription = (data['subscription'] as Map?) ?? {};
+          final plan = (subscription['plan'] ?? 'free').toString();
+
+          final country = (data['country'] ?? '-').toString();
+          final gymName = (data['gymName'] ?? '-').toString();
+          final level = (data['experienceLevel'] ?? '-').toString();
+          final fav = (data['favoriteGroup'] ?? '-').toString();
+
+          return ListView(
             padding: const EdgeInsets.all(16),
-            child: ListView(
-              children: [
-                _row('Email', u.email ?? '-'),
-                _row('Name', u.displayName ?? '-'),
-                _row('Country', (d['country'] ?? '-').toString()),
-                _row('Gym', (d['gymName'] ?? '-').toString()),
-                _row('Experience', (d['experienceLevel'] ?? '-').toString()),
-                _row('Favorite group', (d['favoriteGroup'] ?? '-').toString()),
-                _row('Plan', (sub['plan'] ?? 'free').toString()),
-                const SizedBox(height: 16),
-                ElevatedButton.icon(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => ProfileSetupPage(onDone: () {}),
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.edit),
-                  label: const Text('Edit profile'),
+            children: [
+              // Identity block
+              Card(
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(color: Theme.of(context).dividerColor),
                 ),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const CalibrationIntroPage(),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        u.displayName ?? u.email ?? '-',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
-                    );
-                  },
-                  icon: const Icon(Icons.straighten),
-                  label: const Text('Calibration'),
+                      const SizedBox(height: 6),
+                      Text(u.email ?? '-', style: const TextStyle(height: 1.2)),
+                      const SizedBox(height: 6),
+                      Text('Plan: ${plan.toUpperCase()}'),
+                    ],
+                  ),
                 ),
-              ],
-            ),
+              ),
+
+              const SizedBox(height: 12),
+
+              // Read-only training prefs
+              Card(
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(color: Theme.of(context).dividerColor),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    children: [
+                      _roRow('Country', country),
+                      _roRow('Gym name', gymName),
+                      _roRow('Experience level', level),
+                      _roRow('Favorite group', fav),
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.edit_outlined),
+                          label: const Text('Edit'),
+                          onPressed: () async {
+                            await Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => ProfileEditPage(
+                                  initialCountry: country == '-'
+                                      ? null
+                                      : country,
+                                  initialGymName: gymName == '-'
+                                      ? null
+                                      : gymName,
+                                  initialLevel: level == '-' ? null : level,
+                                  initialFavGroup: fav == '-' ? null : fav,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              // Calibration
+              Card(
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(color: Theme.of(context).dividerColor),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    children: [
+                      const ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text('Calibration'),
+                        subtitle: Text(
+                          'Add (or re-do) optional photos for body-length calibration. '
+                          'We store only derived measurements — not your photos.',
+                        ),
+                      ),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: FilledButton.icon(
+                          icon: const Icon(Icons.camera_alt_outlined),
+                          label: const Text('Open calibration'),
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const CalibrationIntroPage(),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           );
         },
       ),
     );
   }
 
-  Widget _row(String k, String v) {
+  Widget _roRow(String label, String value) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         children: [
-          SizedBox(
-            width: 140,
+          SizedBox(width: 140, child: Text(label)),
+          Expanded(
             child: Text(
-              '$k:',
+              value,
+              textAlign: TextAlign.right,
               style: const TextStyle(fontWeight: FontWeight.w600),
             ),
           ),
-          Expanded(child: Text(v)),
         ],
       ),
     );
