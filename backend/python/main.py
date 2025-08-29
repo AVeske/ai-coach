@@ -1,7 +1,14 @@
-import os, shutil, tempfile, logging, yaml
-from typing import Any, Dict
+# backend/python/main.py
+from __future__ import annotations
+import os
+import shutil
+import tempfile
+import logging
+import yaml
+import datetime as dt
+from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
@@ -11,16 +18,18 @@ from pose_extractor import extract_pose_from_video
 from analysis.validators import basic_validation
 from analysis.dispatcher import score_reps
 from agents.coach_agent import get_feedback
+from services.firebase_db import ensure_firebase, verify_token, save_session
+from side_selector import infer_side, smooth_samples, write_samples_csv
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("aicoach")
 
-app = FastAPI(title="AI Coach Backend", version="0.6.0")
+app = FastAPI(title="AI Coach Backend", version="0.8.1")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],           # tighten in production
+    allow_origins=["*"],  # tighten for prod
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -28,7 +37,7 @@ app.add_middleware(
 
 @app.get("/healthz")
 def healthz():
-    return {"ok": True, "model": "movenet_server", "version": "0.6.0"}
+    return {"ok": True, "model": "movenet_server", "version": "0.8.1"}
 
 def _load_rubric(ex_id: str) -> Dict[str, Any]:
     base = os.path.dirname(__file__)
@@ -38,45 +47,34 @@ def _load_rubric(ex_id: str) -> Dict[str, Any]:
     with open(fname, "r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
 
-# --- filming side inference ---
-LEFT = ["left_shoulder","left_elbow","left_wrist","left_hip","left_knee","left_ankle"]
-RIGHT = ["right_shoulder","right_elbow","right_wrist","right_hip","right_knee","right_ankle"]
-
-def infer_side(samples):
-    def mean_conf(names):
-        tot = cnt = 0.0
-        for s in samples:
-            lm = s.get("landmarks", {})
-            for n in names:
-                v = lm.get(n)
-                if v and v[2] is not None:
-                    tot += float(v[2]); cnt += 1
-        return (tot / cnt) if cnt else 0.0
-    ml = mean_conf(LEFT)
-    mr = mean_conf(RIGHT)
-    return ("left" if ml >= mr else "right", ml, mr)
-
 @app.post("/analyze")
 async def analyze_video(
-    exercise_id: str = Form(...),          # slug like "pushup" or "squats"
+    request: Request,
+    exercise_id: str = Form(...),
     video: UploadFile = File(...),
+    weight_value: Optional[str] = Form(None),   # optional
+    weight_unit: Optional[str] = Form(None),    # 'kg' | 'lb'
 ):
     tmpdir = tempfile.mkdtemp(prefix="aicoach_")
     try:
+        # Extract Firebase ID token (if present)
+        auth_header = request.headers.get("Authorization", "")
+        id_token = auth_header.split(" ", 1)[1].strip() if auth_header.lower().startswith("bearer ") else None
+
         # Save upload to temp
         suffix = os.path.splitext(video.filename or "upload.mp4")[1] or ".mp4"
         tmp_path = os.path.join(tmpdir, f"input{suffix}")
         raw = await video.read()
         with open(tmp_path, "wb") as f:
             f.write(raw)
-        log.info("Received: name=%s bytes=%d exercise_id=%s path=%s",
-                 video.filename, len(raw), exercise_id, tmp_path)
+        log.info(
+            "Received: name=%s bytes=%d exercise_id=%s path=%s",
+            video.filename, len(raw), exercise_id, tmp_path
+        )
 
-        # Pose extraction (MoveNet Thunder)
+        # Pose extraction
         pose_out: Dict[str, Any] = extract_pose_from_video(
-            tmp_path,
-            sample_fps=15.0,
-            max_samples=600,
+            tmp_path, sample_fps=15.0, max_samples=600,
         )
         if not pose_out.get("ok"):
             return JSONResponse(
@@ -103,21 +101,80 @@ async def analyze_video(
         # Load exercise rubric (optional)
         cfg = _load_rubric(exercise_id)
 
-        # Choose filming side before temp cleanup
+        # Choose fps & gather raw samples
         fps = float(pose_out.get("fps", 30.0) or 30.0)
-        samples = pose_out.get("samples", [])
-        side, left_mean, right_mean = infer_side(samples)
+        samples_raw = pose_out.get("samples", [])
 
-        # Score reps (unchanged)
-        metrics = score_reps(exercise_id, samples, fps, cfg)
+        # ---- Smoothing + CSV export (analyze on smoothed) ----
+        alpha = 0.2  # lower = smoother, higher = snappier
+        samples_smooth = smooth_samples(samples_raw, alpha=alpha)
 
-        # Attach side info
+        # CSV directory: backend/python/csvs/
+        base_dir = os.path.dirname(__file__)
+        csv_dir = os.path.join(base_dir, "csvs")
+        ts_utc = dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+
+        uid = None
+        uid_for_name = "anon"
+        if id_token and ensure_firebase():
+            uid = verify_token(id_token)
+            if uid:
+                uid_for_name = uid[:6]
+
+        csv_base = f"{ts_utc}_{exercise_id}_{uid_for_name}_smoothed"
+        csv_path = write_samples_csv(samples_smooth, csv_dir, csv_base)
+        csv_saved = csv_path is not None
+        # ------------------------------------------------------
+
+        # Use smoothed for side inference and scoring
+        side, left_mean, right_mean = infer_side(samples_smooth)
+
+        metrics = score_reps(exercise_id, samples_smooth, fps, cfg)
         metrics["selected_side"] = side
         metrics["side_confidence"] = {"left": left_mean, "right": right_mean}
+        metrics["smoothing"] = {"method": "ema", "alpha": alpha}
 
         # LLM feedback
         rubric_text = yaml.safe_dump(cfg, sort_keys=False) if cfg else ""
         agent_text = await get_feedback(exercise_id, metrics, rubric_text)
+
+        # One-line summary
+        s = (metrics.get("summary") or {})
+        total = int(s.get("total_reps", 0) or 0)
+        good = int(s.get("good_reps", 0) or 0)
+        bad  = int(s.get("bad_reps", 0) or 0)
+        one_line = f"{exercise_id}: {total} reps • {good} good • {bad} needs work."
+
+        # Optional weight
+        weight = None
+        if weight_value:
+            try:
+                val = float(str(weight_value).replace(",", "."))
+                unit = (weight_unit or "kg").lower()
+                if unit not in ("kg", "lb"):
+                    unit = "kg"
+                weight = {"value": val, "unit": unit}
+            except Exception:
+                weight = None
+
+        # If verified user, save to Firestore server-side
+        saved = False
+        session_id = None
+        if uid:
+            payload = {
+                "exerciseId": exercise_id,
+                "repsCount": total,
+                "goodReps": good,
+                "badReps": bad,
+                "feedbackSummary": one_line,
+                "feedbackFull": agent_text,
+            }
+            if weight:
+                payload["weight"] = weight
+            sid = save_session(uid, payload)
+            if sid:
+                saved = True
+                session_id = sid
 
         return JSONResponse({
             "ok": True,
@@ -126,6 +183,15 @@ async def analyze_video(
             "fps": fps,
             "metrics": metrics,
             "agent_feedback": agent_text,
+            "weight_echo": weight,
+            "saved": saved,
+            "session_id": session_id,
+            # debug/visibility:
+            "csv_saved": csv_saved,
+            "csv_file": (
+                os.path.relpath(csv_path, start=os.path.dirname(base_dir))
+                if csv_saved else None
+            ),
             "dbg": pose_out.get("dbg", {}),
         })
 
