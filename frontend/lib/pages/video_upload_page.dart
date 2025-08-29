@@ -27,9 +27,20 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
   File? _videoFile;
   VideoPlayerController? _videoController;
 
+  final _weightCtrl = TextEditingController();
+  String _unit = 'kg';
+
   String aiFeedback = '';
   bool _isBusy = false;
   bool _submitted = false; // after success, lock controls
+
+  @override
+  void dispose() {
+    _videoController?.pause();
+    _videoController?.dispose();
+    _weightCtrl.dispose();
+    super.dispose();
+  }
 
   void _showSnack(String msg) {
     if (!mounted) return;
@@ -149,6 +160,12 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
             ..fields['exercise_id'] = widget.exercise
             ..files.add(await http.MultipartFile.fromPath('video', file.path));
 
+      final weightText = _weightCtrl.text.trim();
+      if (weightText.isNotEmpty) {
+        req.fields['weight_value'] = weightText;
+        req.fields['weight_unit'] = _unit; // 'kg' or 'lb'
+      }
+
       if (idToken != null) req.headers['Authorization'] = 'Bearer $idToken';
 
       final streamed = await req.send();
@@ -165,13 +182,11 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
           return;
         }
 
-        // Prefer agent feedback, else fallback we build locally
         final agent = (data['agent_feedback'] as String?)?.trim();
         final feedbackText = (agent != null && agent.isNotEmpty)
             ? agent
             : _buildFallbackFeedback(data);
 
-        // Only consider it "valid" if backend says so (so History isn't polluted)
         final isValid =
             (data['ok'] == true) &&
             (data['analysis_ok'] == true) &&
@@ -182,25 +197,8 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
           _submitted = isValid; // lock UI only if a valid analysis came back
         });
 
-        if (isValid) {
-          final metrics = (data['metrics'] as Map).cast<String, dynamic>();
-          final summary =
-              (metrics['summary'] as Map?)?.cast<String, dynamic>() ?? {};
-          final total = summary['total_reps'] ?? 0;
-          final good = summary['good_reps'] ?? 0;
-          final bad = summary['bad_reps'] ?? 0;
-
-          final oneLine =
-              '${widget.exercise}: $total reps • $good good • $bad needs work.';
-
-          await Db.addSuccessfulSession(
-            exerciseId: widget.exercise,
-            repsCount: total is int ? total : int.tryParse('$total') ?? 0,
-            goodReps: good is int ? good : int.tryParse('$good') ?? 0,
-            badReps: bad is int ? bad : int.tryParse('$bad') ?? 0,
-            feedbackSummary: oneLine,
-            feedbackFull: feedbackText,
-          );
+        if (isValid && (data['saved'] == true)) {
+          _showSnack('Saved to history ✔');
         }
       } else {
         try {
@@ -224,13 +222,6 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
   }
 
   @override
-  void dispose() {
-    _videoController?.pause();
-    _videoController?.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final controlsDisabled = _isBusy || _submitted;
 
@@ -242,7 +233,7 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // NEW: plan + today counter (display-only, not enforced)
+              // Plan/usage (display-only)
               StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
                 stream: Db.streamUserDoc(),
                 builder: (_, s1) {
@@ -304,7 +295,43 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
               ),
               const SizedBox(height: 12),
 
-              // Loading UI (progress + friendly message)
+              // Optional working weight
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _weightCtrl,
+                      enabled: !controlsDisabled,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                        signed: false,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: 'Weight (optional)',
+                        hintText: 'e.g. 60',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  SizedBox(
+                    width: 92,
+                    child: DropdownButtonFormField<String>(
+                      value: _unit,
+                      decoration: const InputDecoration(labelText: 'Unit'),
+                      items: const [
+                        DropdownMenuItem(value: 'kg', child: Text('kg')),
+                        DropdownMenuItem(value: 'lb', child: Text('lb')),
+                      ],
+                      onChanged: controlsDisabled
+                          ? null
+                          : (v) => setState(() => _unit = v ?? _unit),
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 12),
+
               if (_isBusy) ...[
                 const LinearProgressIndicator(),
                 const SizedBox(height: 8),
@@ -316,7 +343,6 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
                 const SizedBox(height: 12),
               ],
 
-              // Record / Upload
               Row(
                 children: [
                   Expanded(
@@ -373,7 +399,7 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
                     label: const Text('Start new exercise'),
                     onPressed: () {
                       if (!mounted) return;
-                      Navigator.pop(context); // back to exercise list
+                      Navigator.pop(context);
                     },
                   ),
                 ),

@@ -10,14 +10,15 @@ class HistoryPage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('History')),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: Db.streamMySessions(), // <-- CHANGED
+        stream: Db.streamMySessions(),
         builder: (_, snap) {
           if (snap.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
           final docs = snap.data?.docs ?? [];
-          if (docs.isEmpty)
+          if (docs.isEmpty) {
             return const Center(child: Text('No sessions yet.'));
+          }
 
           return ListView.separated(
             padding: const EdgeInsets.all(12),
@@ -25,14 +26,39 @@ class HistoryPage extends StatelessWidget {
             separatorBuilder: (_, __) => const SizedBox(height: 8),
             itemBuilder: (_, i) {
               final d = docs[i].data();
+
               final ts = d['createdAt'] as Timestamp?;
               final date = ts?.toDate();
+
               final ex = (d['exerciseId'] ?? '-').toString();
-              final reps = (d['repsCount'] ?? 0).toString();
-              final good = (d['goodReps'] ?? 0).toString();
-              final bad = (d['badReps'] ?? 0).toString();
+
+              int _asInt(dynamic v) => v is int ? v : int.tryParse('$v') ?? 0;
+              final reps = _asInt(d['repsCount']);
+              final good = _asInt(d['goodReps']);
+              final bad = _asInt(d['badReps']);
+
               final summary = (d['feedbackSummary'] ?? '').toString();
               final full = (d['feedbackFull'] ?? '').toString();
+
+              String weightStr = '';
+              final w = d['weight'];
+              if (w is Map) {
+                final val = w['value'];
+                final unit = (w['unit'] ?? '').toString();
+                if (val != null) {
+                  final numVal = (val is num) ? val : num.tryParse('$val');
+                  if (numVal != null) {
+                    weightStr =
+                        ' • Weight: ${numVal.toString()}${unit.isNotEmpty ? ' $unit' : ''}';
+                  }
+                }
+              }
+
+              final subtitleLines = <String>[
+                if (date != null) date.toLocal().toString(),
+                'Reps: $reps  •  Good: $good  •  Needs work: $bad$weightStr',
+                if (summary.isNotEmpty) summary,
+              ];
 
               return ExpansionTile(
                 shape: RoundedRectangleBorder(
@@ -53,11 +79,7 @@ class HistoryPage extends StatelessWidget {
                   style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
                 subtitle: Text(
-                  [
-                    if (date != null) date.toLocal().toString(),
-                    'Reps: $reps  •  Good: $good  •  Needs work: $bad',
-                    if (summary.isNotEmpty) summary,
-                  ].where((s) => s.isNotEmpty).join('\n'),
+                  subtitleLines.where((s) => s.isNotEmpty).join('\n'),
                 ),
                 children: [
                   if (full.isNotEmpty)
