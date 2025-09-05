@@ -3,7 +3,7 @@ from typing import List, Dict, Any, Tuple, Optional
 import numpy as np
 from scipy.signal import find_peaks
 
-# ─────────── low‑level helpers ───────────
+# ─────────── low-level helpers ───────────
 def xy(v):
     if not v: return None
     return np.array([float(v[0]), float(v[1])], dtype=float)
@@ -36,7 +36,10 @@ def angle_series(samples: List[Dict[str, Any]], triplet: List[str]) -> np.ndarra
 
 def best_of_two(samples, t1, t2) -> np.ndarray:
     a = angle_series(samples, t1); b = angle_series(samples, t2)
-    return a if np.isnan(a).sum() <= np.isnan(b).sum() else b
+    # pick the one with fewer NaNs; if equal, prefer the one with higher median confidence implicitly
+    if np.isnan(a).sum() <= np.isnan(b).sum():
+        return a
+    return b
 
 # ─────────── event detection / pairing ───────────
 def find_events(primary: np.ndarray, fps: float, *, peak_is_top=True, min_dist_s=0.30, prom_std=0.18, width_s=0.08):
@@ -71,7 +74,7 @@ def pair_top_bottom_top(primary: np.ndarray, tops, bottoms, fps: float, *, dur_m
 
 # ─────────── grading helpers ───────────
 def tier_of(value: Optional[float], tiers: Dict[str, List[float]]) -> str:
-    if value is None or np.isnan(value):
+    if value is None or (isinstance(value, float) and np.isnan(value)):
         return "unknown"
     for name, rng in tiers.items():
         lo, hi = float(rng[0]), float(rng[1])

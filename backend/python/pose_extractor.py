@@ -8,7 +8,6 @@ import numpy as np
 from typing import Dict, Any, List, Tuple, Optional
 
 # Prefer tflite-runtime (smaller), fall back to TF Lite if present
-
 from tensorflow.lite.python.interpreter import Interpreter  # type: ignore
 
 # ---------- MoveNet Thunder model ----------
@@ -55,49 +54,69 @@ def _load_interpreter() -> Interpreter:
     return interpreter
 
 
-def _preprocess_frame(bgr: np.ndarray) -> np.ndarray:
-    # BGR -> RGB, center-crop square, resize to 256, return uint8 with batch axis
+def _rotate_image(bgr: np.ndarray, rotate_deg: int) -> np.ndarray:
+    """Rotate BGR image by given degrees. Fast path for multiples of 90."""
+    deg = int(rotate_deg) % 360
+    if deg == 0:
+        return bgr
+    if deg == 90:
+        return cv2.rotate(bgr, cv2.ROTATE_90_CLOCKWISE)
+    if deg == 180:
+        return cv2.rotate(bgr, cv2.ROTATE_180)
+    if deg == 270:
+        return cv2.rotate(bgr, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    # Arbitrary angle: rotate about image center, keep same size (black corners may appear)
     h, w = bgr.shape[:2]
-    if h != w:
-        side = min(h, w); y0 = (h - side) // 2; x0 = (w - side) // 2
-        bgr = bgr[y0:y0+side, x0:x0+side]
+    M = cv2.getRotationMatrix2D((w / 2.0, h / 2.0), -deg, 1.0)  # negative for clockwise
+    return cv2.warpAffine(bgr, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+
+
+def _center_crop_square(bgr: np.ndarray) -> np.ndarray:
+    h, w = bgr.shape[:2]
+    if h == w:
+        return bgr
+    side = min(h, w)
+    y0 = (h - side) // 2
+    x0 = (w - side) // 2
+    return bgr[y0:y0 + side, x0:x0 + side]
+
+
+def _preprocess_frame_from_bgr(bgr: np.ndarray) -> np.ndarray:
+    """
+    BGR -> RGB, resize to 256x256, return with batch axis for inference.
+    Assumes the image is already rotated and square-cropped if desired.
+    """
     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
     rgb = cv2.resize(rgb, (INPUT_SIZE, INPUT_SIZE), interpolation=cv2.INTER_LINEAR)
-    return rgb[np.newaxis, ...]  # (1,256,256,3) uint8
+    return rgb[np.newaxis, ...]  # (1,256,256,3) uint8 or float depending on model I/O
 
 
-def _infer_keypoints(interpreter: Interpreter, frame_bgr: np.ndarray) -> List[Tuple[float, float, float]]:
+def _infer_keypoints(interpreter: Interpreter, preprocessed_batch: np.ndarray) -> List[Tuple[float, float, float]]:
     """
-    Run MoveNet on one frame and return a list of 17 (x, y, score) with coords normalized to 0..1.
-    This is the helper you were asking about — it *actually* performs the TFLite inference.
+    Run MoveNet on one preprocessed frame (with batch axis).
+    Return a list of 17 (x, y, score) with coords normalized to [0,1].
     """
-    inp = _preprocess_frame(frame_bgr)
-
-    # Set input tensor
     input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
+
+    inp = preprocessed_batch
     dtype = input_details[0]["dtype"]
     if dtype == np.float32:
-        inp = inp.astype(np.float32) / 255.0         # for older float models
+        inp = inp.astype(np.float32) / 255.0  # for float models
     elif dtype == np.uint8:
-        inp = inp.astype(np.uint8)                   # v4 quantized expects uint8
+        inp = inp.astype(np.uint8)           # for quantized models
     else:
         raise TypeError(f"Unsupported input dtype: {dtype}")
-    
-    interpreter.set_tensor(input_details[0]["index"], inp)
-    output_details = interpreter.get_output_details()
-    interpreter.set_tensor(input_details[0]["index"], inp)
 
-    # Run inference
+    interpreter.set_tensor(input_details[0]["index"], inp)
     interpreter.invoke()
 
     # Output shape for MoveNet single pose: (1,1,17,3): y, x, score
     out = interpreter.get_tensor(output_details[0]["index"])  # type: ignore
-    # Defensive checks
     if out.ndim != 4 or out.shape[2] != 17 or out.shape[3] != 3:
-        # Unexpected; return zeros
         return [(0.0, 0.0, 0.0)] * 17
 
-    kp = out[0, 0, :, :]  # (17,3)
+    kp = out[0, 0, :, :]  # (17, 3) in (y, x, score)
     # Convert (y,x,score) -> (x,y,score) and clamp to [0,1]
     res: List[Tuple[float, float, float]] = []
     for i in range(17):
@@ -146,14 +165,19 @@ def extract_pose_from_video(
     video_path: str,
     sample_fps: float = 15.0,
     max_samples: int = 600,
+    *,
+    rotate_deg: int = 0,            # <<< NEW: rotate frames before inference & CSV
+    save_debug_png: bool = True,
 ) -> Dict[str, Any]:
     """
     Server-side MoveNet Thunder extractor.
       • Reads the video with OpenCV.
-      • Samples frames to ~sample_fps (e.g., 15–20).
-      • Runs TFLite MoveNet on each kept frame via _infer_keypoints().
-      • Maps indices -> names, drops face/ear points, returns a compact JSON.
-      • Optionally writes a CSV next to the input (for debugging).
+      • Optionally rotates each frame by rotate_deg (0, 90, 180, 270 fast path).
+      • Center-crops to square, resizes to 256.
+      • Samples frames to ~sample_fps.
+      • Runs TFLite MoveNet on each kept frame.
+      • Maps indices -> names, drops face/ear points.
+      • Writes a CSV next to the input (post-rotation coordinates), for debugging.
 
     Returns:
       {
@@ -164,7 +188,13 @@ def extract_pose_from_video(
            { "t": seconds, "landmarks": { "left_shoulder": [x,y,conf], ... } },
            ...
         ],
-        "dbg": {...}  # optional timing, counts, etc.
+        "dbg": {
+          "input_fps": ...,
+          "stride": ...,
+          "kept": ...,
+          "duration_s": ...,
+          "rotate_deg": ...
+        }
       }
     """
     if not os.path.exists(video_path):
@@ -185,9 +215,12 @@ def extract_pose_from_video(
     samples: List[Dict[str, Any]] = []
     t0 = time.time()
 
+    debug_written = False
+    debug_png_path = os.path.join(os.path.dirname(__file__), "debug_frame.png")
+
     try:
         while True:
-            ok, frame = cap.read()
+            ok, frame_bgr = cap.read()
             if not ok:
                 break
             total_frames += 1
@@ -196,9 +229,27 @@ def extract_pose_from_video(
             if (total_frames - 1) % stride != 0:
                 continue
 
-            kps = _infer_keypoints(interpreter, frame)  # <-- WIRE-IN HAPPENS HERE
+            # 1) rotate (so model + CSV see upright orientation)
+            frame_bgr = _rotate_image(frame_bgr, rotate_deg)
 
-            # map to dict and drop undesired points
+            # 2) center-crop square
+            frame_bgr = _center_crop_square(frame_bgr)
+
+            # 3) save the very first kept (post-rotation) frame for sanity check
+            if save_debug_png and not debug_written:
+                try:
+                    cv2.imwrite(debug_png_path, frame_bgr)
+                    debug_written = True
+                except Exception:
+                    pass
+
+            # 4) preprocess to model input
+            inp = _preprocess_frame_from_bgr(frame_bgr)
+
+            # 5) MoveNet inference
+            kps = _infer_keypoints(interpreter, inp)
+
+            # 6) map to dict and drop undesired points
             lm_dict: Dict[str, List[float]] = {}
             for idx, name in enumerate(MOVENET_KEYPOINTS):
                 if name in EXCLUDE:
@@ -206,6 +257,7 @@ def extract_pose_from_video(
                 x, y, c = kps[idx]
                 lm_dict[name] = [x, y, c]
 
+            # 7) timestamp in sampled space
             t_sec = kept / max(1.0, out_fps)
             samples.append({"t": float(t_sec), "landmarks": lm_dict})
 
@@ -232,5 +284,7 @@ def extract_pose_from_video(
             "stride": stride,
             "kept": kept,
             "duration_s": time.time() - t0,
+            "rotate_deg": int(rotate_deg),
+            "debug_png": debug_png_path if debug_written else None,
         },
     }

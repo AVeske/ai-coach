@@ -1,31 +1,47 @@
 events:
   peak_is_top: true
-  min_peak_distance_frames: 0.30s
+  # slightly more sensitive event picking
+  min_peak_distance_frames: 0.36s
   min_rep_duration_s: 0.40
   max_rep_duration_s: 7.0
-  prominence_std: 0.18
+  prominence_std: 0.09
   width_sec: 0.08
+  winsor_lo: 0.10
+  winsor_hi: 0.90
+
+  # percentile bands on shoulder-Y (y larger at bottom)
+  shoulder_y_bottom_pct: 0.72
+  shoulder_y_top_pct: 0.28
 
 metrics:
-  rom_deg: # elbow ROM (top − bottom)
+  # ROM gate – loosen a bit so borderline reps aren’t dropped
+  rom_deg:
     kind: rom
+    min_delta: 35
     tiers:
       optimal: [90, 999]
       acceptable: [70, 90]
       suboptimal: [0, 70]
-  back_neutral_deg: # back angle at bottom
-    kind: angle_at
-    at: bottom
-    series_hint: back
-    tiers:
-      optimal: [170, 190]
-      acceptable: [160, 170]
-      suboptimal: [0, 160]
+
   tempo_s:
     kind: tempo
     tiers:
       optimal: [0.8, 3.0]
       acceptable: [0.5, 0.8]
       suboptimal: [0.0, 0.5]
+
+  # Angle bounds – a tad friendlier so they become flags, not vetoes
+  lockout_min_deg: 160
+  bottom_max_deg: 105
+
+  # Hip coherence – widen slightly; we’ll still flag outliers
+  hip_sag_norm:
+    max: 0.10
+  hip_amp_ratio:
+    lo: 0.50
+    hi: 1.35
+
+  # Refractory window (avoid double-counting)
+  refractory_ms: 300
 
 bad_flags: [suboptimal]
