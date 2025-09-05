@@ -13,6 +13,7 @@
 .env
 __pycache__/
 
+
 # ────────────── IDEs ──────────────
 .idea/
 .vscode/
@@ -52,6 +53,16 @@ backend/python/*.pyc
 backend/python/.mypy_cache/
 backend/python/.pytest_cache/
 backend/python/.coverage
+backend/python/firebase-admin.json
+backend/python/csvs/*.csv
+backend/python/angleshots/.png
+backend/python/csvs/
+backend/python/angleshots/
+backend/python/testing/
+backend/python/testing/images/
+backend/python/testing/images/*.png
+backend/python/*.png
+
 
 # ────────────── DOCKER ──────────────
 docker-compose.override.yml
@@ -64,3 +75,7 @@ docker-compose.override.yml
 # ────────────── TEST OUTPUT / MIGRATIONS ──────────────
 .migrate_working_dir/
 coverage/
+
+# ────────────── Firebase / Google service keys ──────────────
+*firebase-admin*.json
+*.serviceAccountKey.json
