@@ -73,7 +73,7 @@ const exercises = <Exercise>[
   ),
 
   Exercise(
-    id: 'squats',
+    id: 'squat',
     group: ExerciseGroup.legs,
     name: 'Squats',
     tip: 'Side view at hip height.',

@@ -381,7 +381,7 @@ class _VideoUploadPageState extends State<VideoUploadPage> {
                   width: double.infinity,
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFFCC80),
+                    color: const Color.fromARGB(255, 58, 50, 39),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: const Color(0xFFFFE0B2)),
                   ),

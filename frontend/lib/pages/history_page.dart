@@ -32,10 +32,10 @@ class HistoryPage extends StatelessWidget {
 
               final ex = (d['exerciseId'] ?? '-').toString();
 
-              int _asInt(dynamic v) => v is int ? v : int.tryParse('$v') ?? 0;
-              final reps = _asInt(d['repsCount']);
-              final good = _asInt(d['goodReps']);
-              final bad = _asInt(d['badReps']);
+              int asInt(dynamic v) => v is int ? v : int.tryParse('$v') ?? 0;
+              final reps = asInt(d['repsCount']);
+              final good = asInt(d['goodReps']);
+              final bad = asInt(d['badReps']);
 
               final summary = (d['feedbackSummary'] ?? '').toString();
               final full = (d['feedbackFull'] ?? '').toString();
