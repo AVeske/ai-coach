@@ -1,0 +1,66 @@
+events:
+  peak_is_top: true
+  min_peak_distance_frames: 0.35s
+  min_rep_duration_s: 0.50
+  max_rep_duration_s: 8.0
+  prominence_std: 0.08
+  width_sec: 0.06
+  winsor_lo: 0.05
+  winsor_hi: 0.95
+  force_signal: auto
+  refractory_ms: 250
+  hip_y_bottom_pct: 0.78
+  hip_y_top_pct: 0.22
+  seed:
+    window_s: 0.6
+    peak_frac: 0.96
+    tol_deg: 8.0
+    min_drop_frac: 0.05
+    min_drop_deg: 14.0
+    exclude_radius_frames: 3
+    skip_if_valid_span_starts_within_s: 1.0
+  bookend:
+    edge_start_s: 1.2
+    edge_end_s: 1.0
+    min_amp_deg: 40
+    min_frac_of_median: 0.75
+    pre_start_ignore_s: 0.6
+    depth_guard_deg: 10
+
+metrics:
+  rom_deg:
+    kind: rom
+    min_delta: 25
+    tiers:
+      optimal: [70, 999]
+      acceptable: [50, 70]
+      suboptimal: [0, 50]
+  tempo_s:
+    kind: tempo
+    tiers:
+      optimal: [1.0, 3.5]
+      acceptable: [0.6, 1.0]
+      suboptimal: [0.0, 0.6]
+  lockout_min_deg: 165
+  bottom_max_deg: 95
+
+debug:
+  force_signal: knee
+  prefer_knee_if_close_delta: 1
+
+debug_plots:
+  enabled: true
+  dir: ./plots
+
+bad_flags: [suboptimal]
+
+trim:
+  enabled: false
+  min_run_s: 1.2
+  pad_s: 0.35
+  conf_ema_alpha: 0.25
+  motion_ema_alpha: 0.35
+  conf_weight: 0.6
+  motion_weight: 0.4
+  z_active_thresh: -0.2
+  z_inactive_thresh: -0.6

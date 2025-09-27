@@ -1,158 +1,172 @@
+# backend/python/analysis/trim.py
 from __future__ import annotations
 from typing import List, Dict, Any, Tuple
 import numpy as np
 
-# We’ll borrow robust peak pairing from the analysis.common module
-from analysis.common import find_peaks, find_events, pair_top_bottom_top  # type: ignore
+CORE_PARTS = [
+    "left_shoulder","right_shoulder",
+    "left_hip","right_hip",
+    "left_elbow","right_elbow",
+    "left_knee","right_knee",
+    "left_wrist","right_wrist",
+    "left_ankle","right_ankle",
+]
 
-# Helper: build a shoulder-Y series (choose the cleaner side)
-def _shoulder_y_series(samples: List[Dict[str, Any]]) -> np.ndarray:
-    yL, yR = [], []
-    for s in samples:
-        lm = s.get("landmarks", {})
-        vL = lm.get("left_shoulder")
-        vR = lm.get("right_shoulder")
-        yL.append(float(vL[1]) if vL and vL[1] is not None else np.nan)
-        yR.append(float(vR[1]) if vR and vR[1] is not None else np.nan)
-    a = np.array(yL, dtype=float)
-    b = np.array(yR, dtype=float)
-    return a if np.isnan(a).sum() <= np.isnan(b).sum() else b
+def _get_xyc(sample: Dict[str, Any], name: str):
+    lm = sample.get("landmarks") or {}
+    v = lm.get(name)
+    if not v or len(v) < 3:
+        return None, None, None
+    x, y, c = v[0], v[1], v[2]
+    return (float(x) if x is not None else None,
+            float(y) if y is not None else None,
+            float(c) if c is not None else None)
 
-def _nan_fill(arr: np.ndarray) -> np.ndarray:
-    out = arr.copy()
-    # forward fill
-    last = np.nan
-    for i in range(len(out)):
-        if np.isnan(out[i]):
-            out[i] = last
-        else:
-            last = out[i]
-    # back fill
-    last = np.nan
-    for i in range(len(out)-1, -1, -1):
-        if np.isnan(out[i]):
-            out[i] = last
-        else:
-            last = out[i]
-    # replace remaining NaNs with 0
-    out = np.where(np.isnan(out), 0.0, out)
+def _ema(arr: np.ndarray, alpha: float) -> np.ndarray:
+    out = np.empty_like(arr, dtype=float)
+    if arr.size == 0:
+        return arr.astype(float)
+    out[0] = arr[0]
+    for i in range(1, len(arr)):
+        out[i] = alpha * arr[i] + (1.0 - alpha) * out[i-1]
     return out
 
-def _median_smooth_1d(arr: np.ndarray, k: int = 5) -> np.ndarray:
-    out = arr.copy()
-    n = len(arr)
-    for i in range(n):
-        lo, hi = max(0, i-k), min(n, i+k+1)
-        w = arr[lo:hi]
-        w = w[~np.isnan(w)]
-        out[i] = float(np.median(w)) if len(w) else np.nan
-    return out
+def _zscore(a: np.ndarray) -> np.ndarray:
+    if a.size == 0:
+        return a.astype(float)
+    m = float(np.nanmean(a)) if not np.isnan(a).all() else 0.0
+    s = float(np.nanstd(a)) if not np.isnan(a).all() else 1.0
+    s = (s if s > 1e-6 else 1.0)
+    return (a - m) / s
 
-def _trim_by_rep_envelope(samples: List[Dict[str, Any]], fps: float, pad_s: float) -> Tuple[int, int, dict]:
-    """
-    Try to find rep tops across the whole clip using shoulder-Y (inverted).
-    Use first-top to last-top span as the active envelope, padded by pad_s.
-    Returns (lo_idx, hi_idx, dbg)
-    """
-    if not samples:
-        return 0, 0, {"method": "none", "reason": "no_samples"}
+def _motion_energy(samples: List[Dict[str, Any]]) -> np.ndarray:
+    """Side-agnostic motion from hips & shoulders (both sides), in pixel units."""
+    n = len(samples)
+    if n == 0:
+        return np.zeros(0, dtype=float)
+    xs, ys = [], []
+    parts = ["left_shoulder","right_shoulder","left_hip","right_hip"]
+    for p in parts:
+        x = np.array([_get_xyc(s, p)[0] for s in samples], dtype=float)
+        y = np.array([_get_xyc(s, p)[1] for s in samples], dtype=float)
+        xs.append(x); ys.append(y)
+    X = np.nanmean(np.vstack(xs), axis=0)  # [n]
+    Y = np.nanmean(np.vstack(ys), axis=0)
+    # forward diff magnitude
+    dX = np.abs(np.diff(X, prepend=X[:1]))
+    dY = np.abs(np.diff(Y, prepend=Y[:1]))
+    return np.sqrt(dX*dX + dY*dY)
 
-    y = _shoulder_y_series(samples)
-    y = _median_smooth_1d(y, k=3)
-    inv = -y
-    inv = _nan_fill(inv)
-
-    # Find tops & bottoms on the inverted series (tops == lockout)
-    tops, bottoms = find_events(inv, fps, peak_is_top=True, min_dist_s=0.30, prom_std=0.10, width_s=0.05)
-
-    dbg = {"method": "peaks_envelope", "tops": int(len(tops)), "bottoms": int(len(bottoms))}
-    if len(tops) >= 2:
-        first_top = int(tops[0])
-        last_top = int(tops[-1])
-        pad = int(pad_s * fps)
-        lo = max(0, first_top - pad)
-        hi = min(len(samples), last_top + pad)
-        # Ensure hi>lo
-        if hi - lo >= max(1, int(0.8 * fps)):  # at least ~0.8s window
-            return lo, hi, dbg
-
-    # Not enough tops found; let caller fallback
-    dbg["reason"] = "not_enough_tops"
-    return 0, 0, dbg
-
-def _trim_by_motion_energy(samples: List[Dict[str, Any]], fps: float, min_run_s: float, pad_s: float) -> Tuple[int, int, dict]:
-    """
-    Previous method: pick the longest run by motion energy.
-    """
-    if not samples:
-        return 0, 0, {"method": "motion_energy", "reason": "no_samples"}
-
-    seq = []
+def _frame_conf(samples: List[Dict[str, Any]]) -> np.ndarray:
+    n = len(samples)
+    if n == 0:
+        return np.zeros(0, dtype=float)
+    confs = []
     for s in samples:
-        pts = []
-        for v in (s.get("landmarks") or {}).values():
-            if v: pts.extend([float(v[0]), float(v[1])])
-        if pts:
-            seq.append(np.array(pts, dtype=float))
+        vals = []
+        lm = s.get("landmarks") or {}
+        for k in CORE_PARTS:
+            v = lm.get(k)
+            if v and len(v) >= 3 and v[2] is not None:
+                vals.append(float(v[2]))
+        confs.append(float(np.median(vals)) if vals else 0.0)
+    return np.array(confs, dtype=float)
+
+def _pick_active_run(active: np.ndarray, min_len: int) -> Tuple[int,int]:
+    """Pick the longest contiguous active run with length >= min_len. Returns [lo, hi) indexes."""
+    n = len(active)
+    best_len, best_lo, best_hi = 0, 0, 0
+    i = 0
+    while i < n:
+        if active[i]:
+            j = i+1
+            while j < n and active[j]:
+                j += 1
+            run_len = j - i
+            if run_len > best_len:
+                best_len, best_lo, best_hi = run_len, i, j
+            i = j
         else:
-            seq.append(None)
-    diffs = []
-    prev = None
-    for v in seq:
-        if v is None or prev is None or prev.shape != v.shape:
-            diffs.append(0.0)
-        else:
-            diffs.append(float(np.linalg.norm(v - prev)))
-        prev = v
-    diffs = np.array(diffs, dtype=float)
-    thr = max(1e-6, np.percentile(diffs[diffs>0], 40) if np.any(diffs>0) else 0.0)
-    active = (diffs >= thr).astype(np.int32)
-
-    # find longest active run
-    best_lo = best_hi = 0
-    cur_lo = 0 if active[0] else -1
-    best_len = 0
-    for i,a in enumerate(active):
-        if a == 1 and cur_lo < 0:
-            cur_lo = i
-        if a == 0 and cur_lo >= 0:
-            if i-cur_lo > best_len:
-                best_len = i-cur_lo; best_lo = cur_lo; best_hi = i
-            cur_lo = -1
-    if cur_lo >= 0:
-        i = len(active)
-        if i-cur_lo > best_len:
-            best_len = i-cur_lo; best_lo = cur_lo; best_hi = i
-
-    pad = int(pad_s * fps)
-    lo = max(0, best_lo - pad)
-    hi = min(len(samples), best_hi + pad)
-
-    # ensure minimum window
-    min_len = int(min_run_s * fps)
-    if hi - lo < min_len:
-        hi = min(len(samples), lo + min_len)
-
-    return lo, hi, {"method": "motion_energy", "best_len": int(best_len), "thr": float(thr)}
+            i += 1
+    if best_len >= min_len:
+        return best_lo, best_hi
+    return 0, n  # if nothing meets min_len, return full window (no trim)
 
 def trim_active_window(
     samples: List[Dict[str, Any]],
     fps: float,
     *,
     min_run_s: float = 1.2,
-    pad_s: float = 0.35
-) -> Tuple[List[Dict[str,Any]], int, int, dict]:
+    pad_s: float = 0.35,
+    conf_ema_alpha: float = 0.25,
+    motion_ema_alpha: float = 0.35,
+    conf_weight: float = 0.6,
+    motion_weight: float = 0.4,
+    z_active_thresh: float = -0.2,
+    z_inactive_thresh: float = -0.6,
+) -> Tuple[List[Dict[str, Any]], int, int, Dict[str, Any]]:
     """
-    Preferred: derive window from rep envelope (top-to-top) using shoulder-Y peaks.
-    Fallback: longest motion-energy run.
-    Returns: (trimmed_samples, lo_index, hi_index, debug)
+    Generic trim:
+      - Computes EMA-smoothed frame confidence and motion energy.
+      - Z-scores each, then combines into an 'activity' score.
+      - Hysteresis thresholding (active > z_active_thresh; inactive < z_inactive_thresh).
+      - Picks the longest active run (>= min_run_s). Adds symmetric pad_s on both ends.
+    Returns (trimmed_samples, lo_idx, hi_idx, reasons).
     """
-    if not samples:
-        return samples, 0, 0, {"method": "none", "reason": "no_samples"}
+    n = len(samples)
+    if n == 0 or fps <= 0:
+        return samples, 0, n, {"method": "generic_trim", "reason": "empty_or_bad_fps"}
 
-    lo, hi, dbg1 = _trim_by_rep_envelope(samples, fps, pad_s)
-    if hi > lo:
-        return samples[lo:hi], lo, hi, dbg1
+    conf = _frame_conf(samples)
+    mot  = _motion_energy(samples)
 
-    lo2, hi2, dbg2 = _trim_by_motion_energy(samples, fps, min_run_s, pad_s)
-    return samples[lo2:hi2], lo2, hi2, dbg2
+    # Smooth
+    conf_s = _ema(conf, conf_ema_alpha)
+    mot_s  = _ema(mot, motion_ema_alpha)
+
+    # Normalize
+    zc = _zscore(conf_s)
+    zm = _zscore(mot_s)
+
+    # Combined activity (weighted)
+    act = conf_weight * zc + motion_weight * zm
+
+    # Hysteresis: build a boolean active mask
+    active = np.zeros(n, dtype=bool)
+    currently_on = False
+    for i in range(n):
+        if currently_on:
+            currently_on = act[i] > z_inactive_thresh
+        else:
+            currently_on = act[i] > z_active_thresh
+        active[i] = currently_on
+
+    min_len = int(round(min_run_s * max(1.0, fps)))
+    lo, hi = _pick_active_run(active, min_len=min_len)
+
+    # Apply pad (clamped)
+    pad = int(round(pad_s * max(1.0, fps)))
+    lo_p = max(0, lo - pad)
+    hi_p = min(n, hi + pad)
+
+    trimmed = samples[lo_p:hi_p]
+    reasons = {
+        "method": "generic_trim",
+        "frames_total": n,
+        "lo_raw": lo, "hi_raw": hi,
+        "lo_padded": lo_p, "hi_padded": hi_p,
+        "min_run_s": min_run_s, "pad_s": pad_s,
+        "conf_stats": {
+            "median": float(np.median(conf)) if conf.size else 0.0,
+            "ema_med": float(np.median(conf_s)) if conf_s.size else 0.0,
+        },
+        "motion_stats": {
+            "median": float(np.median(mot)) if mot.size else 0.0,
+            "ema_med": float(np.median(mot_s)) if mot_s.size else 0.0,
+        },
+        "thresholds": {
+            "z_active": z_active_thresh,
+            "z_inactive": z_inactive_thresh,
+        }
+    }
+    return trimmed, lo_p, hi_p, reasons

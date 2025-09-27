@@ -178,6 +178,21 @@ def elbow_angle_at_event(samples: List[Dict[str, Any]], idx: int, primary: str, 
     other = "right" if primary == "left" else "left"
     return ang(other)
 
+
+def knee_angle_series_for_side(samples: List[Dict[str, Any]], side: str, *, conf_thresh: float = 0.30) -> np.ndarray:
+    from analysis.common import xy, angle_deg
+    out = []
+    for s in samples:
+        lm = s.get("landmarks", {})
+        H = lm.get(f"{side}_hip")
+        K = lm.get(f"{side}_knee")
+        A = lm.get(f"{side}_ankle")
+        if H and K and A and min(H[2], K[2], A[2]) is not None and float(min(H[2], K[2], A[2])) >= conf_thresh:
+            out.append(angle_deg(xy(H), xy(K), xy(A)))
+        else:
+            out.append(np.nan)
+    return np.array(out, dtype=float)
+
 # ---------------------------------------------------------------------
 # CSV writer
 # ---------------------------------------------------------------------
