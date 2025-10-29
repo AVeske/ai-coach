@@ -1,0 +1,90 @@
+meta:
+  id: tricep_extensions
+  name: Triceps Extensions
+  group: arms
+  filming:
+    primary_view: side_45
+    tip: "Side view; elbow clearly visible and stays fixed."
+  signals:
+    primary: elbow_angle
+    fallback: wrist_y
+    peak_is_top: true # lockout
+
+events:
+  min_peak_distance_s: 0.35
+  min_rep_duration_s: 0.45
+  max_rep_duration_s: 6.5
+  prominence_std: 0.08
+  width_s: 0.05
+  winsor_lo: 0.08
+  winsor_hi: 0.92
+  force_signal: auto
+  force_variant: auto
+  seed:
+    window_s: 0.60
+    peak_frac: 0.96
+    tol_deg: 8.0
+    min_drop_frac: 0.05
+    min_drop_deg: 14.0
+    exclude_radius_frames: 3
+    skip_if_valid_span_starts_within_s: 1.0
+  bookend:
+    edge_start_s: 1.0
+    edge_end_s: 1.0
+    min_amp_deg: 26.0
+    min_frac_of_median: 0.60
+    pre_start_ignore_s: 0.0
+    depth_guard_deg: null
+
+quality:
+  enabled: true
+  rom_min_deg: 30
+  ecc_min_s: 0.6
+  con_max_s: 2.8
+  total_max_s: 6.5
+  bottom_max_s: 0.8
+  top_max_s: 1.2
+  vel_ecc_max: 500
+  con_to_ecc_ratio_hi: 1.8
+  con_heavy_s: 2.2
+  pause_eps_deg_s: 8
+  min_pause_s: 0.12
+
+metrics:
+  rom_deg:
+    kind: rom
+    min_delta: 30
+    tiers:
+      optimal: [75, 999]
+      acceptable: [55, 75]
+      suboptimal: [0, 55]
+  tempo_s:
+    kind: tempo
+    tiers:
+      optimal: [0.8, 3.0]
+      acceptable: [0.5, 0.8]
+      suboptimal: [0.0, 0.5]
+  lockout_min_deg: 165
+  bottom_max_deg: 95
+
+trim:
+  enabled: false
+  min_run_s: 1.2
+  pad_s: 0.35
+  conf_ema_alpha: 0.25
+  motion_ema_alpha: 0.35
+  conf_weight: 0.6
+  motion_weight: 0.4
+  z_active_thresh: -0.2
+  z_inactive_thresh: -0.6
+
+debug:
+  prefer_variant_if_close: auto
+  prefer_primary_if_close_delta: 1
+  bands: {}
+
+debug_plots:
+  enabled: true
+  dir: ./plots
+
+bad_flags: [suboptimal]

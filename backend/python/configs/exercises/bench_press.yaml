@@ -1,21 +1,21 @@
 meta:
-  id: squat
-  name: Back Squat
-  group: legs
+  id: bench_press
+  name: Bench Press
+  group: chest
   filming:
-    primary_view: side_90
-    tip: "True 90° side view, hips/knees visible; barbell plates don’t block joints."
+    primary_view: side_45
+    tip: "45° side view from bar path side; elbows and bar clear of plates."
   signals:
-    primary: knee_angle
-    fallback: hip_y
+    primary: elbow_angle
+    fallback: wrist_y
     peak_is_top: true
 
 events:
-  min_peak_distance_s: 0.35
-  min_rep_duration_s: 0.50
-  max_rep_duration_s: 8.0
+  min_peak_distance_s: 0.30
+  min_rep_duration_s: 0.45
+  max_rep_duration_s: 7.0
   prominence_std: 0.08
-  width_s: 0.06
+  width_s: 0.05
   winsor_lo: 0.05
   winsor_hi: 0.95
   force_signal: auto
@@ -30,22 +30,22 @@ events:
     exclude_radius_frames: 3
     skip_if_valid_span_starts_within_s: 1.0
   bookend:
-    edge_start_s: 1.2
+    edge_start_s: 1.0
     edge_end_s: 1.0
-    min_amp_deg: 40.0
-    min_frac_of_median: 0.75
-    pre_start_ignore_s: 0.6
-    depth_guard_deg: 10.0
+    min_amp_deg: 30.0
+    min_frac_of_median: 0.65
+    pre_start_ignore_s: 0.0
+    depth_guard_deg: null
 
 quality:
   enabled: true
-  rom_min_deg: 25
-  ecc_min_s: 0.9
+  rom_min_deg: 30
+  ecc_min_s: 0.8
   con_max_s: 3.5
-  total_max_s: 8.0
+  total_max_s: 7.0
   bottom_max_s: 1.0
   top_max_s: 1.5
-  vel_ecc_max: 420
+  vel_ecc_max: 450
   con_to_ecc_ratio_hi: 1.7
   con_heavy_s: 2.6
   pause_eps_deg_s: 8
@@ -54,11 +54,11 @@ quality:
 metrics:
   rom_deg:
     kind: rom
-    min_delta: 25
+    min_delta: 30
     tiers:
-      optimal: [70, 999]
-      acceptable: [50, 70]
-      suboptimal: [0, 50]
+      optimal: [80, 999]
+      acceptable: [60, 80]
+      suboptimal: [0, 60]
   tempo_s:
     kind: tempo
     tiers:
@@ -83,10 +83,8 @@ debug:
   prefer_variant_if_close: auto
   prefer_primary_if_close_delta: 1
   bands:
-    shoulder_y_bottom_pct: null
-    shoulder_y_top_pct: null
-    wrist_y_bottom_pct: null
-    wrist_y_top_pct: null
+    wrist_y_bottom_pct: 0.75
+    wrist_y_top_pct: 0.25
 
 debug_plots:
   enabled: true

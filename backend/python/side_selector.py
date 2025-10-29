@@ -8,46 +8,73 @@ import numpy as np
 
 log = logging.getLogger("aicoach")
 
-# --- landmarks by side ---
-LEFT = ["left_shoulder","left_elbow","left_wrist","left_hip","left_knee","left_ankle"]
-RIGHT = ["right_shoulder","right_elbow","right_wrist","right_hip","right_knee","right_ankle"]
-CORE = ("shoulder","elbow","wrist","hip")
+# ---------------------------------------------------------------------
+# Landmark naming helpers
+# ---------------------------------------------------------------------
+
+LEFT = ["left_shoulder", "left_elbow", "left_wrist", "left_hip", "left_knee", "left_ankle"]
+RIGHT = ["right_shoulder", "right_elbow", "right_wrist", "right_hip", "right_knee", "right_ankle"]
+CORE = ("shoulder", "elbow", "wrist", "hip")  # used for side selection quality signals
+
 
 def _pair(side: str, name: str) -> str:
+    """Build 'left_elbow' style keys."""
     return f"{side}_{name}"
+
 
 # ---------------------------------------------------------------------
 # Global side selection (coverage + median confidence with safety margin)
 # ---------------------------------------------------------------------
+
 def _coverage_and_conf(samples: List[Dict[str, Any]], side: str) -> Tuple[float, float]:
+    """
+    Returns (coverage, median_conf) for the given side.
+
+    coverage      = fraction of frames where at least one CORE landmark has a confidence
+                    (not None)
+    median_conf   = median of per-frame medians over CORE landmarks for frames that had data
+    """
     if not samples:
         return 0.0, 0.0
+
     seen = 0
-    confs: List[float] = []
+    per_frame_meds: List[float] = []
+
     for s in samples:
-        lm = s.get("landmarks", {})
-        vals = []
+        lm = s.get("landmarks", {}) or {}
+        vals: List[float] = []
         for part in CORE:
             v = lm.get(_pair(side, part))
             if v and len(v) >= 3 and v[2] is not None:
-                vals.append(float(v[2]))
+                try:
+                    vals.append(float(v[2]))
+                except Exception:
+                    pass
         if vals:
             seen += 1
-            confs.append(float(np.median(vals)))
+            per_frame_meds.append(float(np.median(vals)))
+
     coverage = seen / float(len(samples))
-    med = float(np.median(confs)) if confs else 0.0
-    return coverage, med
+    med_conf = float(np.median(per_frame_meds)) if per_frame_meds else 0.0
+    return coverage, med_conf
+
 
 def pick_primary_side(
     samples: List[Dict[str, Any]],
     *,
     min_coverage: float = 0.6,
-    conf_margin: float = 0.10
+    conf_margin: float = 0.10,
 ) -> Tuple[str, Dict[str, Any]]:
+    """
+    Choose 'left' or 'right' based on:
+    - coverage threshold
+    - median confidence with a safety margin (conf_margin) if both pass coverage
+    Falls back to the higher-confidence side if neither passes coverage.
+    """
     covL, medL = _coverage_and_conf(samples, "left")
     covR, medR = _coverage_and_conf(samples, "right")
 
-    left_ok  = (covL >= min_coverage)
+    left_ok = (covL >= min_coverage)
     right_ok = (covR >= min_coverage)
 
     if left_ok and right_ok:
@@ -70,9 +97,11 @@ def pick_primary_side(
     }
     return side, dbg
 
+
 # ---------------------------------------------------------------------
-# Confidence-weighted smoothing + tiny gap fill (EMA per landmark)
+# Confidence-weighted smoothing + tiny gap hold (EMA per landmark)
 # ---------------------------------------------------------------------
+
 def _ema(prev: Optional[float], x: Optional[float], alpha: float) -> Optional[float]:
     if x is None:
         return prev
@@ -80,33 +109,42 @@ def _ema(prev: Optional[float], x: Optional[float], alpha: float) -> Optional[fl
         return x
     return alpha * x + (1.0 - alpha) * prev
 
+
 def smooth_samples(
     samples: List[Dict[str, Any]],
     *,
     alpha_min: float = 0.08,
     alpha_max: float = 0.35,
     conf_for_alpha: float = 0.60,
-    max_hold_gap: int = 3
+    max_hold_gap: int = 3,
 ) -> List[Dict[str, Any]]:
+    """
+    Per-landmark EMA smoothing where alpha scales with confidence (higher conf → faster).
+    If a coordinate/conf is missing, hold the last value up to `max_hold_gap` frames.
+    """
     out: List[Dict[str, Any]] = []
+    # state[k] = (sx, sy, sc)
     state: Dict[str, Tuple[Optional[float], Optional[float], Optional[float]]] = {}
     gap_cnt: Dict[str, int] = {}
 
     for s in samples:
         lm = (s.get("landmarks") or {})
         o_lm: Dict[str, List[Optional[float]]] = {}
+
+        # union of keys so all known landmarks keep streaming through
         keys = set(state.keys()) | set(lm.keys())
         for k in keys:
-            v = lm.get(k)
-            x = float(v[0]) if v and v[0] is not None else None
-            y = float(v[1]) if v and v[1] is not None else None
-            c = float(v[2]) if v and v[2] is not None else None
+            v = lm.get(k) or [None, None, None]
+            x = float(v[0]) if v[0] is not None else None
+            y = float(v[1]) if v[1] is not None else None
+            c = float(v[2]) if v[2] is not None else None
 
             prev = state.get(k, (None, None, None))
             cc = (c if c is not None else 0.0)
             t = max(0.0, min(1.0, cc / max(1e-6, conf_for_alpha)))
             alpha = alpha_min + (alpha_max - alpha_min) * t
 
+            # tiny gap hold
             if x is None and gap_cnt.get(k, 0) < max_hold_gap:
                 x = prev[0]
             if y is None and gap_cnt.get(k, 0) < max_hold_gap:
@@ -126,99 +164,243 @@ def smooth_samples(
             state[k] = (sx, sy, sc)
             o_lm[k] = [sx, sy, sc]
 
-        out.append({**{k:v for k,v in s.items() if k != "landmarks"}, "landmarks": o_lm})
+        out.append({**{k: v for k, v in s.items() if k != "landmarks"}, "landmarks": o_lm})
     return out
+
 
 # ---------------------------------------------------------------------
 # Side-aware series builders with visibility masking
 # ---------------------------------------------------------------------
-def series_y_for_joint(samples: List[Dict[str, Any]], joint: str, side: str, *, conf_thresh: float = 0.30) -> np.ndarray:
-    arr = []
+
+def series_y_for_joint(
+    samples: List[Dict[str, Any]],
+    joint: str,
+    side: str,
+    *,
+    conf_thresh: float = 0.30,
+) -> np.ndarray:
+    """Screen-space Y for side+joint; masks to NaN if confidence < conf_thresh."""
+    if not samples:
+        return np.array([], dtype=float)
+    arr: List[float] = []
+    key = f"{side}_{joint}"
     for s in samples:
-        lm = s.get("landmarks", {})
-        v = lm.get(f"{side}_{joint}")
+        lm = s.get("landmarks", {}) or {}
+        v = lm.get(key)
         if v and len(v) >= 3 and v[1] is not None and v[2] is not None and float(v[2]) >= conf_thresh:
             arr.append(float(v[1]))
         else:
             arr.append(np.nan)
     return np.array(arr, dtype=float)
 
-def elbow_angle_series_for_side(samples: List[Dict[str, Any]], side: str, *, conf_thresh: float = 0.30) -> np.ndarray:
-    from analysis.common import xy, angle_deg
-    out = []
+
+def series_x_for_joint(
+    samples: List[Dict[str, Any]],
+    joint: str,
+    side: str,
+    *,
+    conf_thresh: float = 0.30,
+) -> np.ndarray:
+    """Screen-space X for side+joint; masks to NaN if confidence < conf_thresh."""
+    if not samples:
+        return np.array([], dtype=float)
+    arr: List[float] = []
+    key = f"{side}_{joint}"
     for s in samples:
-        lm = s.get("landmarks", {})
-        S = lm.get(f"{side}_shoulder")
-        E = lm.get(f"{side}_elbow")
-        W = lm.get(f"{side}_wrist")
-        if S and E and W and min(S[2],E[2],W[2]) is not None and float(min(S[2],E[2],W[2])) >= conf_thresh:
-            a=xy(S); b=xy(E); c=xy(W)
-            out.append(angle_deg(a,b,c))
+        lm = s.get("landmarks", {}) or {}
+        v = lm.get(key)
+        if v and len(v) >= 3 and v[0] is not None and v[2] is not None and float(v[2]) >= conf_thresh:
+            arr.append(float(v[0]))
         else:
-            out.append(np.nan)
+            arr.append(np.nan)
+    return np.array(arr, dtype=float)
+
+
+def series_xy_for_joint(
+    samples: List[Dict[str, Any]],
+    joint: str,
+    side: str,
+    *,
+    conf_thresh: float = 0.30,
+) -> np.ndarray:
+    """
+    Returns Nx2 array of [x, y]; row becomes [nan, nan] when masked.
+    """
+    if not samples:
+        return np.zeros((0, 2), dtype=float)
+    xs: List[float] = []
+    ys: List[float] = []
+    key = f"{side}_{joint}"
+    for s in samples:
+        lm = s.get("landmarks", {}) or {}
+        v = lm.get(key)
+        if v and len(v) >= 3 and all(val is not None for val in (v[0], v[1], v[2])) and float(v[2]) >= conf_thresh:
+            xs.append(float(v[0])); ys.append(float(v[1]))
+        else:
+            xs.append(np.nan); ys.append(np.nan)
+    return np.stack([np.array(xs, float), np.array(ys, float)], axis=1)
+
+
+# --- Angle series (all NaN-safe, confidence-gated) --------------------
+
+def elbow_angle_series_for_side(
+    samples: List[Dict[str, Any]],
+    side: str,
+    *,
+    conf_thresh: float = 0.30,
+) -> np.ndarray:
+    """Elbow angle: shoulder–elbow–wrist."""
+    from analysis.common import xy, angle_deg
+    if not samples:
+        return np.array([], dtype=float)
+    out: List[float] = []
+    for s in samples:
+        lm = s.get("landmarks", {}) or {}
+        S = lm.get(f"{side}_shoulder"); E = lm.get(f"{side}_elbow"); W = lm.get(f"{side}_wrist")
+        ok = (S and E and W and min(S[2], E[2], W[2]) is not None and float(min(S[2], E[2], W[2])) >= conf_thresh)
+        out.append(float(angle_deg(xy(S), xy(E), xy(W))) if ok else np.nan)
     return np.array(out, dtype=float)
+
+
+def shoulder_angle_series_for_side(
+    samples: List[Dict[str, Any]],
+    side: str,
+    *,
+    conf_thresh: float = 0.30,
+) -> np.ndarray:
+    """
+    Shoulder angle: elbow–shoulder–hip (useful for pull-ups/rows).
+    Larger ≈ more extended (hang), smaller ≈ more flexed (peak pull).
+    """
+    from analysis.common import xy, angle_deg
+    if not samples:
+        return np.array([], dtype=float)
+    out: List[float] = []
+    for s in samples:
+        lm = s.get("landmarks", {}) or {}
+        E = lm.get(f"{side}_elbow"); S = lm.get(f"{side}_shoulder"); H = lm.get(f"{side}_hip")
+        ok = (E and S and H and min(E[2], S[2], H[2]) is not None and float(min(E[2], S[2], H[2])) >= conf_thresh)
+        out.append(float(angle_deg(xy(E), xy(S), xy(H))) if ok else np.nan)
+    return np.array(out, dtype=float)
+
+
+def hip_angle_series_for_side(
+    samples: List[Dict[str, Any]],
+    side: str,
+    *,
+    conf_thresh: float = 0.30,
+) -> np.ndarray:
+    """Hip angle: shoulder–hip–knee (trunk-thigh)."""
+    from analysis.common import xy, angle_deg
+    if not samples:
+        return np.array([], dtype=float)
+    out: List[float] = []
+    for s in samples:
+        lm = s.get("landmarks", {}) or {}
+        S = lm.get(f"{side}_shoulder"); H = lm.get(f"{side}_hip"); K = lm.get(f"{side}_knee")
+        ok = (S and H and K and min(S[2], H[2], K[2]) is not None and float(min(S[2], H[2], K[2])) >= conf_thresh)
+        out.append(float(angle_deg(xy(S), xy(H), xy(K))) if ok else np.nan)
+    return np.array(out, dtype=float)
+
+
+def knee_angle_series_for_side(
+    samples: List[Dict[str, Any]],
+    side: str,
+    *,
+    conf_thresh: float = 0.30,
+) -> np.ndarray:
+    """Knee angle: hip–knee–ankle."""
+    from analysis.common import xy, angle_deg
+    if not samples:
+        return np.array([], dtype=float)
+    out: List[float] = []
+    for s in samples:
+        lm = s.get("landmarks", {}) or {}
+        H = lm.get(f"{side}_hip"); K = lm.get(f"{side}_knee"); A = lm.get(f"{side}_ankle")
+        ok = (H and K and A and min(H[2], K[2], A[2]) is not None and float(min(H[2], K[2], A[2])) >= conf_thresh)
+        out.append(float(angle_deg(xy(H), xy(K), xy(A))) if ok else np.nan)
+    return np.array(out, dtype=float)
+
+
+def elbow_angle_at_event(
+    samples: List[Dict[str, Any]],
+    idx: int,
+    primary: str,
+    *,
+    conf_thresh: float = 0.30,
+) -> Optional[float]:
+    """
+    Elbow angle at a single frame, trying primary side first, then the other side.
+    """
+    from analysis.common import xy, angle_deg
+
+    def _ang(side: str) -> Optional[float]:
+        lm = samples[idx].get("landmarks", {}) or {}
+        S = lm.get(f"{side}_shoulder"); E = lm.get(f"{side}_elbow"); W = lm.get(f"{side}_wrist")
+        ok = (S and E and W and min(S[2], E[2], W[2]) is not None and float(min(S[2], E[2], W[2])) >= conf_thresh)
+        return float(angle_deg(xy(S), xy(E), xy(W))) if ok else None
+
+    a = _ang(primary)
+    if a is not None:
+        return a
+    other = "right" if primary == "left" else "left"
+    return _ang(other)
+
 
 def torso_len_at(samples: List[Dict[str, Any]], idx: int, side: str) -> Optional[float]:
-    lm = samples[idx].get("landmarks", {})
+    """
+    Euclidean distance shoulder↔hip at a frame (proxy for scale/normalization).
+    """
+    lm = samples[idx].get("landmarks", {}) or {}
     S = lm.get(f"{side}_shoulder"); H = lm.get(f"{side}_hip")
-    if not (S and H): return None
-    if S[0] is None or S[1] is None or H[0] is None or H[1] is None: return None
-    return float(np.hypot(float(S[0])-float(H[0]), float(S[1])-float(H[1])))
-
-def elbow_angle_at_event(samples: List[Dict[str, Any]], idx: int, primary: str, *, conf_thresh: float = 0.30) -> Optional[float]:
-    from analysis.common import xy, angle_deg
-    def ang(side: str) -> Optional[float]:
-        lm = samples[idx].get("landmarks", {})
-        S = lm.get(f"{side}_shoulder"); E = lm.get(f"{side}_elbow"); W = lm.get(f"{side}_wrist")
-        if S and E and W and min(S[2],E[2],W[2]) is not None and float(min(S[2],E[2],W[2])) >= conf_thresh:
-            return float(angle_deg(xy(S),xy(E),xy(W)))
+    if not (S and H):
         return None
-    a = ang(primary)
-    if a is not None: return a
-    other = "right" if primary == "left" else "left"
-    return ang(other)
+    if S[0] is None or S[1] is None or H[0] is None or H[1] is None:
+        return None
+    return float(np.hypot(float(S[0]) - float(H[0]), float(S[1]) - float(H[1])))
 
-
-def knee_angle_series_for_side(samples: List[Dict[str, Any]], side: str, *, conf_thresh: float = 0.30) -> np.ndarray:
-    from analysis.common import xy, angle_deg
-    out = []
-    for s in samples:
-        lm = s.get("landmarks", {})
-        H = lm.get(f"{side}_hip")
-        K = lm.get(f"{side}_knee")
-        A = lm.get(f"{side}_ankle")
-        if H and K and A and min(H[2], K[2], A[2]) is not None and float(min(H[2], K[2], A[2])) >= conf_thresh:
-            out.append(angle_deg(xy(H), xy(K), xy(A)))
-        else:
-            out.append(np.nan)
-    return np.array(out, dtype=float)
 
 # ---------------------------------------------------------------------
-# CSV writer
+# CSV dump for debugging / offline inspection
 # ---------------------------------------------------------------------
+
 def write_samples_csv(samples: List[Dict[str, Any]], out_dir: str, base_name: str) -> Optional[str]:
+    """
+    Write all landmark tracks to CSV:
+      frame[, t], <name>_x, <name>_y, <name>_c …
+    Returns the file path on success, else None.
+    """
     try:
         os.makedirs(out_dir, exist_ok=True)
-        names: set[str] = set()
+        names: set = set()
         for s in samples:
             lm = s.get("landmarks") or {}
             names.update(lm.keys())
         ordered = sorted(names)
+
         header = ["frame"]
-        has_t = any("t" in s for s in samples)
-        if has_t: header.append("t")
+        has_t = any(("t" in s) for s in samples)
+        if has_t:
+            header.append("t")
         for n in ordered:
             header.extend([f"{n}_x", f"{n}_y", f"{n}_c"])
+
         path = os.path.join(out_dir, f"{base_name}.csv")
         with open(path, "w", newline="", encoding="utf-8") as f:
-            w = csv.writer(f); w.writerow(header)
+            w = csv.writer(f)
+            w.writerow(header)
             for i, s in enumerate(samples):
                 row: List[Any] = [i]
-                if has_t: row.append(s.get("t"))
+                if has_t:
+                    row.append(s.get("t"))
                 lm = s.get("landmarks") or {}
                 for n in ordered:
                     v = lm.get(n) or [None, None, None]
-                    row.extend([v[0] if len(v)>0 else None, v[1] if len(v)>1 else None, v[2] if len(v)>2 else None])
+                    row.extend([
+                        v[0] if len(v) > 0 else None,
+                        v[1] if len(v) > 1 else None,
+                        v[2] if len(v) > 2 else None,
+                    ])
                 w.writerow(row)
         return path
     except Exception as e:

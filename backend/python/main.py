@@ -167,7 +167,7 @@ async def analyze_video(
         # Load cfg
         cfg = load_exercise_cfg(exercise_id)
         trim_cfg = (cfg.get("trim") or {})
-        trim_enabled = bool(trim_cfg.get("enabled", True))
+        trim_enabled = False #bool(trim_cfg.get("enabled", True))
 
         # Generic trim (confidence + motion) – now optional + safe fallback
         t_trim = time.time()
@@ -219,6 +219,37 @@ async def analyze_video(
         t_score = time.time()
         metrics = score_reps(exercise_id, smoothed, fps, cfg, primary_side=side)
         log.info("TIMER scoring: %.3fs", time.time()-t_score)
+
+        # --- Per-rep timestamps (local & global) -------------------------------
+        # Use the scorer's fps if provided (stays consistent with plotting/debug)
+        evd = (metrics.get("event_debug") or {})
+        fps_used = float(evd.get("fps", fps) or fps)
+
+        reps = metrics.get("reps") or []
+        rep_times: List[Dict[str, Any]] = []
+        for i, r in enumerate(reps, start=1):
+            sf = int(r.get("start_frame", 0) or 0)
+            bf = int(r.get("bottom_frame", sf) or sf)
+            ef = int(r.get("end_frame", sf) or sf)
+
+            start_local  = sf / max(1.0, fps_used)
+            bottom_local = bf / max(1.0, fps_used)
+            end_local    = ef / max(1.0, fps_used)
+
+            start_global  = (head_frames + sf) / max(1.0, fps_used)
+            bottom_global = (head_frames + bf) / max(1.0, fps_used)
+            end_global    = (head_frames + ef) / max(1.0, fps_used)
+
+            times = {
+                "local":  {"start": start_local,  "bottom": bottom_local,  "end": end_local},
+                "global": {"start": start_global, "bottom": bottom_global, "end": end_global},
+                "label":  f"Rep {i} — {start_local:.2f}s → {end_local:.2f}s",
+            }
+            r["times"] = times               # attach to each rep
+            rep_times.append({"index": i, **times})
+
+        metrics["rep_times"] = rep_times      # easy to consume on the client
+        # -----------------------------------------------------------------------
 
         summary = metrics.get("summary", {}) or {}
         one_line = _one_line_summary(exercise_id, summary)
@@ -411,6 +442,7 @@ async def analyze_video(
                         "reasons": trim_reasons,
                     },
                     "debug": {"angleshots_saved": len(saved_imgs)},
+                    "repTimes": metrics.get("rep_times", []),
                 }
                 if weight:
                     payload["weight"] = weight

@@ -1,28 +1,27 @@
 meta:
-  id: squat
-  name: Back Squat
+  id: hamstring_curl
+  name: Hamstring Curl
   group: legs
   filming:
-    primary_view: side_90
-    tip: "True 90° side view, hips/knees visible; barbell plates don’t block joints."
+    primary_view: side_45
+    tip: "45° side view on curling leg; knee and ankle visible."
   signals:
     primary: knee_angle
-    fallback: hip_y
-    peak_is_top: true
+    fallback: null
+    peak_is_top: true # “top” = knee extended; curl bottom is the valley in original space
 
 events:
-  min_peak_distance_s: 0.35
-  min_rep_duration_s: 0.50
+  min_peak_distance_s: 0.30
+  min_rep_duration_s: 0.45
   max_rep_duration_s: 8.0
   prominence_std: 0.08
   width_s: 0.06
-  winsor_lo: 0.05
-  winsor_hi: 0.95
+  winsor_lo: 0.08
+  winsor_hi: 0.92
   force_signal: auto
   force_variant: auto
-  refractory_ms: 250
   seed:
-    window_s: 0.6
+    window_s: 0.60
     peak_frac: 0.96
     tol_deg: 8.0
     min_drop_frac: 0.05
@@ -30,24 +29,24 @@ events:
     exclude_radius_frames: 3
     skip_if_valid_span_starts_within_s: 1.0
   bookend:
-    edge_start_s: 1.2
-    edge_end_s: 1.0
-    min_amp_deg: 40.0
-    min_frac_of_median: 0.75
-    pre_start_ignore_s: 0.6
-    depth_guard_deg: 10.0
+    edge_start_s: 0.8
+    edge_end_s: 0.8
+    min_amp_deg: 18.0
+    min_frac_of_median: 0.65
+    pre_start_ignore_s: 0.0
+    depth_guard_deg: null
 
 quality:
   enabled: true
   rom_min_deg: 25
-  ecc_min_s: 0.9
-  con_max_s: 3.5
+  ecc_min_s: 0.7
+  con_max_s: 3.2
   total_max_s: 8.0
   bottom_max_s: 1.0
   top_max_s: 1.5
-  vel_ecc_max: 420
+  vel_ecc_max: 460
   con_to_ecc_ratio_hi: 1.7
-  con_heavy_s: 2.6
+  con_heavy_s: 2.5
   pause_eps_deg_s: 8
   min_pause_s: 0.12
 
@@ -56,17 +55,17 @@ metrics:
     kind: rom
     min_delta: 25
     tiers:
-      optimal: [70, 999]
-      acceptable: [50, 70]
-      suboptimal: [0, 50]
+      optimal: [65, 999]
+      acceptable: [45, 65]
+      suboptimal: [0, 45]
   tempo_s:
     kind: tempo
     tiers:
-      optimal: [1.0, 3.5]
-      acceptable: [0.6, 1.0]
+      optimal: [0.9, 3.4]
+      acceptable: [0.6, 0.9]
       suboptimal: [0.0, 0.6]
   lockout_min_deg: 165
-  bottom_max_deg: 95
+  bottom_max_deg: 90
 
 trim:
   enabled: false
@@ -82,11 +81,7 @@ trim:
 debug:
   prefer_variant_if_close: auto
   prefer_primary_if_close_delta: 1
-  bands:
-    shoulder_y_bottom_pct: null
-    shoulder_y_top_pct: null
-    wrist_y_bottom_pct: null
-    wrist_y_top_pct: null
+  bands: {}
 
 debug_plots:
   enabled: true
