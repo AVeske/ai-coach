@@ -16,6 +16,10 @@ The goal of this project is to:
 - provide structured feedback based on measurable criteria
 ## 2. System Overview
 
+![System Pipeline](system_pipeline.png)
+
+*Figure: End-to-end pipeline from video input to feedback generation."
+
 The system is built as a modular data processing pipeline, transforming raw video into structured feedback.
 
 ### Input
