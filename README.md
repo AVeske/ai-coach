@@ -122,7 +122,7 @@ This project aligns with several core topics in Robotics and Data Science, espec
 - Intelligent Systems — combining learned components with interpretable rule-based logic
 - Physical Movement Analysis — computational interpretation of real-world motion
 
-The project demonstrates an ability to:
+### The project demonstrates an ability to:
 
 - build a pipeline from raw visual input to structured output
 - process and analyze temporal motion data
