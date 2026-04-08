@@ -17,7 +17,7 @@ The goal of this project is to:
 ## 2. System Overview
 
 ![System Pipeline](system_pipeline.png)
-*Figure: End-to-end pipeline from video input to feedback generation."
+*Figure: End-to-end pipeline from video input to feedback generation.*
 
 The system is built as a modular data processing pipeline, transforming raw video into structured feedback.
 
@@ -43,7 +43,7 @@ The system is built as a modular data processing pipeline, transforming raw vide
 ### Rep Detection
 - Generic top–bottom–top pattern detection
 - Uses peak detection and temporal constraints
-- Designed to generalize across different exercises
+- Structured to support extension across different exercises
   
 ### Evaluation Logic
 
@@ -102,26 +102,29 @@ Key components:
 
 ## 4. Project Status
 - Functional prototype
-- Rep detection works reliably across multiple exercises
+- Rep detection has been implemented and tested across multiple exercises
 - Per-repetition analysis implemented
-- Feedback generation integrated
+- Structured feedback generation has been integrated into the prototype
 - UI and evaluation still being refined
 
 This project is not production-ready, but demonstrates core system functionality and design.
 
 ## 5. Relevance to Robotics and Data Science
 
-This project aligns with key topics in Robotics and Data Science:
+This project aligns with several core topics in Robotics and Data Science, especially where software systems must interpret physical-world input and transform it into structured decisions.
 
-- Computer Vision — human pose estimation from visual input
-- Time-Series Analysis — extracting structure from temporal signals
-- Signal Processing — smoothing and feature extraction from noisy data
-- Machine Learning Integration — using pre-trained models in a pipeline
-- Intelligent Systems — combining data-driven and rule-based reasoning
-- Human Movement Analysis — interpreting physical actions computationally
+### Relevant areas include:
 
-It demonstrates the ability to:
+- Computer Vision — extracting human pose information from video
+- Time-Series Analysis — identifying movement patterns from temporal signals
+- Signal Processing — smoothing and interpreting noisy motion data
+- Machine Learning Integration — using a pre-trained pose estimation model as part of a larger system
+- Intelligent Systems — combining learned components with interpretable rule-based logic
+- Physical Movement Analysis — computational interpretation of real-world motion
 
-- build data pipelines from raw input to structured output
-- design interpretable evaluation systems
-- apply theoretical concepts to a practical, real-world problem
+The project demonstrates an ability to:
+
+- build a pipeline from raw visual input to structured output
+- process and analyze temporal motion data
+- design interpretable decision logic for real-world movement analysis
+- apply programming and data processing to a practical problem involving physical behavior
